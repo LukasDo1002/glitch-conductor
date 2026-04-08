@@ -9,7 +9,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  // Forward HSL state from content script to server
   if (message.type === "SEND_TO_SERVER") {
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(message.payload);
@@ -41,9 +40,14 @@ function connectToConductor() {
     });
   };
 
-  socket.onclose = () => {
-    console.log("Background: Connection lost. Retrying in 3s...");
-    setTimeout(connectToConductor, 3000);
+  socket.onclose = (event) => {
+    const delay = event.code === 1008 ? 10000 : 3000;
+    console.log(`Background: Connection lost. Retrying in ${delay / 1000}s...`);
+    setTimeout(connectToConductor, delay);
+  };
+
+  socket.onerror = () => {
+    socket.close();
   };
 }
 

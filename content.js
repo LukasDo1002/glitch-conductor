@@ -169,7 +169,7 @@ let lastBroadcast  = 0;
 
 function broadcastState() {
   const now = Date.now();
-  if (now - lastBroadcast < 80) return;
+  if (now - lastBroadcast < 2000) return;
   lastBroadcast = now;
   chrome.runtime.sendMessage({
     type: "SEND_TO_SERVER",
