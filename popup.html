@@ -1,59 +1,71 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <style>
-    body {
-      width: 250px;
-      font-family: monospace;
-      background-color: #111;
-      color: #fff;
-      padding: 15px;
-      margin: 0;
-    }
-    h2 { margin-top: 0; color: #ff3333; font-size: 18px; text-transform: uppercase;}
-    label { display: block; margin-top: 15px; font-size: 12px; color: #aaa;}
-    input, select {
-      width: 100%;
-      box-sizing: border-box;
-      padding: 8px;
-      margin-top: 5px;
-      background: #222;
-      color: #fff;
-      border: 1px solid #555;
-      font-family: monospace;
-    }
-    button {
-      width: 100%;
-      margin-top: 20px;
-      padding: 10px;
-      background-color: #ff3333;
-      color: #fff;
-      border: none;
-      font-weight: bold;
-      cursor: pointer;
-    }
-    button:hover { background-color: #ff6666; }
-    #status { margin-top: 10px; font-size: 12px; color: #00ff00; text-align: center; display: none;}
-  </style>
+<style>
+body {
+  width: 250px;
+  font-family: monospace;
+  background-color: #111;
+  color: #fff;
+  padding: 15px;
+  margin: 0;
+}
+h2 { margin-top: 0; color: #ff3333; font-size: 18px; text-transform: uppercase; }
+label { display: block; margin-top: 15px; font-size: 12px; color: #aaa; }
+input, select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  margin-top: 5px;
+  background: #222;
+  color: #fff;
+  border: 1px solid #555;
+  font-family: monospace;
+}
+button {
+  width: 100%;
+  margin-top: 20px;
+  padding: 10px;
+  background-color: #ff3333;
+  color: #fff;
+  border: none;
+  font-weight: bold;
+  cursor: pointer;
+}
+button:hover { background-color: #ff6666; }
+#status { margin-top: 10px; font-size: 12px; color: #00ff00; text-align: center; display: none; }
+.concept-desc {
+  margin-top: 6px;
+  font-size: 10px;
+  color: #666;
+  line-height: 1.4;
+}
+</style>
 </head>
 <body>
+<h2>Glitch Orchestra</h2>
 
-  <h2>Glitch Orchestra</h2>
-<label for="serverUrl">CONDUCTOR URL (ngrok TCP)</label>
-<input type="text" id="serverUrl" placeholder="e.g. 0.tcp.ngrok.io:12345">
-  <label for="roomCode">SESSION TOKEN (e.g. JODI24)</label>
-  <input type="text" id="roomCode" placeholder="Enter room code...">
+<label for="roomCode">SESSION TOKEN</label>
+<input type="text" id="roomCode" placeholder="e.g. JODI24">
 
-  <label for="instrument">SELECT INSTRUMENT</label>
-  <select id="instrument">
-    <option value="grid">Voice 1: The Grid (Rhythm)</option>
-    <option value="weaver">Voice 2: The Weaver (Arp)</option>
-    <option value="atmosphere">Voice 3: Atmosphere (Drone)</option>
-  </select>
+<label for="instrument">INSTRUMENT</label>
+<select id="instrument">
+  <option value="grid">Voice 1: The Grid (Rhythm)</option>
+  <option value="weaver">Voice 2: The Weaver (Arp)</option>
+  <option value="atmosphere">Voice 3: Atmosphere (Drone)</option>
+</select>
 
-  <button id="saveBtn">SYNC & START</button>
-  <div id="status">Settings Saved! Refresh webpage.</div>
+<label for="concept">SOUND CONCEPT</label>
+<select id="concept">
+  <option value="synesthete">Synesthete — FM synthesis, HSL mapped</option>
+  <option value="navigator">Navigator — collective harmonic tension</option>
+  <option value="organism">Organism — gesture & movement driven</option>
+  <option value="combined">Combined — all three layered</option>
+</select>
+<div class="concept-desc" id="conceptDesc"></div>
 
-  <script src="popup.js"></script>
+<button id="saveBtn">SYNC & START</button>
+<div id="status">Settings Saved! Refresh webpage.</div>
+<script src="popup.js"></script>
 </body>
 </html>

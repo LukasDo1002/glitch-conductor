@@ -9,32 +9,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === "RECONNECT") {
-    reconnect();
+  // Forward HSL state from content script to server
+  if (message.type === "SEND_TO_SERVER") {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(message.payload);
+    }
   }
 });
 
 // ==========================================
 // 2. THE NETWORK RELAY
 // ==========================================
+const CONDUCTOR_URL = "wss://glitch-conductor-production.up.railway.app";
 let socket = null;
-let reconnectTimer = null;
-let currentUrl = null;
 
-function connectToConductor(url) {
-  if (!url) return;
-  currentUrl = url;
-
-  // Clean up any existing socket
-  if (socket) {
-    socket.onclose = null; // prevent the old socket triggering a reconnect loop
-    socket.close();
-  }
-
-  socket = new WebSocket(`ws://${url}`);
+function connectToConductor() {
+  socket = new WebSocket(CONDUCTOR_URL);
 
   socket.onopen = () => {
-    console.log(`Background: Connected to ${url}`);
+    console.log("Background: Connected to Railway conductor!");
   };
 
   socket.onmessage = (event) => {
@@ -50,16 +43,8 @@ function connectToConductor(url) {
 
   socket.onclose = () => {
     console.log("Background: Connection lost. Retrying in 3s...");
-    reconnectTimer = setTimeout(() => connectToConductor(currentUrl), 3000);
+    setTimeout(connectToConductor, 3000);
   };
 }
 
-function reconnect() {
-  if (reconnectTimer) clearTimeout(reconnectTimer);
-  chrome.storage.local.get(['serverUrl'], (data) => {
-    if (data.serverUrl) connectToConductor(data.serverUrl);
-  });
-}
-
-// Connect on startup using whatever URL is saved
-reconnect();
+connectToConductor();
