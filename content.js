@@ -55,7 +55,9 @@ function takeSnapshot() {
         hiddenCtx.drawImage(img, 0, 0);
         scaleX = img.width  / window.innerWidth;
         scaleY = img.height / window.innerHeight;
-        imgData = hiddenCtx.getImageData(0, 0, hiddenCanvas.width, hiddenCanvas.height).data;
+        imgData = hiddenCtx.getImageData(
+          0, 0, hiddenCanvas.width, hiddenCanvas.height
+        ).data;
       };
       img.src = response.dataUrl;
     }
@@ -63,21 +65,23 @@ function takeSnapshot() {
 }
 
 // ==========================================
-// 2. DATA EXTRACTION — RGB + HSL + VARIANCE
+// 2. COLOR EXTRACTION — RGB + HSL + VARIANCE
 // ==========================================
-let currentRed = 0, currentGreen = 0, currentBlue = 0;
-let currentHue = 0, currentSat = 0, currentLight = 0;
-let currentVariance = 0, currentMass = 0;
+let currentHue      = 0;
+let currentSat      = 0;
+let currentLight    = 0;
+let currentVariance = 0;
+let currentMass     = 0;
 
-// Rolling buffer for Organism concept
-const HUE_BUFFER_SIZE = 20;
+const HUE_BUFFER_SIZE = 30;
 let hueBuffer = [];
-let lastHue = 0;
 
 function rgbToHsl(r, g, b) {
   r /= 255; g /= 255; b /= 255;
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  let h, s, l = (max + min) / 2;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h, s;
+  const l = (max + min) / 2;
   if (max === min) {
     h = s = 0;
   } else {
@@ -93,75 +97,79 @@ function rgbToHsl(r, g, b) {
 }
 
 function extractColors(mouseX, mouseY) {
-  let mappedX      = Math.floor(mouseX * scaleX);
-  let mappedY      = Math.floor(mouseY * scaleY);
-  let mappedRadius = Math.floor(currentRadius * scaleX);
+  const mappedX      = Math.floor(mouseX * scaleX);
+  const mappedY      = Math.floor(mouseY * scaleY);
+  const mappedRadius = Math.floor(currentRadius * scaleX);
 
-  let sumR = 0, sumG = 0, sumB = 0;
-  let weightTotal = 0;
-  let samples = [];
+  let sumR = 0, sumG = 0, sumB = 0, weightTotal = 0;
+  const luminances = [];
 
-  let xMin = Math.max(0, mappedX - mappedRadius);
-  let xMax = Math.min(hiddenCanvas.width,  mappedX + mappedRadius);
-  let yMin = Math.max(0, mappedY - mappedRadius);
-  let yMax = Math.min(hiddenCanvas.height, mappedY + mappedRadius);
+  const xMin = Math.max(0, mappedX - mappedRadius);
+  const xMax = Math.min(hiddenCanvas.width,  mappedX + mappedRadius);
+  const yMin = Math.max(0, mappedY - mappedRadius);
+  const yMax = Math.min(hiddenCanvas.height, mappedY + mappedRadius);
 
-  // Sample every 3rd pixel for performance
   for (let x = xMin; x < xMax; x += 3) {
     for (let y = yMin; y < yMax; y += 3) {
-      let dist = Math.sqrt(Math.pow(mappedX - x, 2) + Math.pow(mappedY - y, 2));
+      const dist = Math.sqrt(
+        Math.pow(mappedX - x, 2) + Math.pow(mappedY - y, 2)
+      );
       if (dist <= mappedRadius) {
-        let weight = 1.0 - ((dist / mappedRadius) * currentFeather);
-        let index  = (y * hiddenCanvas.width + x) * 4;
-        sumR += imgData[index]     * weight;
-        sumG += imgData[index + 1] * weight;
-        sumB += imgData[index + 2] * weight;
+        const weight = 1.0 - (dist / mappedRadius) * currentFeather;
+        const idx    = (y * hiddenCanvas.width + x) * 4;
+        sumR += imgData[idx]     * weight;
+        sumG += imgData[idx + 1] * weight;
+        sumB += imgData[idx + 2] * weight;
         weightTotal += weight;
-        samples.push(imgData[index] * 0.299 + imgData[index+1] * 0.587 + imgData[index+2] * 0.114);
+        luminances.push(
+          imgData[idx]     * 0.299 +
+          imgData[idx + 1] * 0.587 +
+          imgData[idx + 2] * 0.114
+        );
       }
     }
   }
 
   if (weightTotal > 0) {
-    let avgR = sumR / weightTotal;
-    let avgG = sumG / weightTotal;
-    let avgB = sumB / weightTotal;
+    const avgR = sumR / weightTotal;
+    const avgG = sumG / weightTotal;
+    const avgB = sumB / weightTotal;
 
-    currentRed   = avgR / 255;
-    currentGreen = avgG / 255;
-    currentBlue  = avgB / 255;
-    currentMass  = weightTotal;
-
-    // Convert to HSL
     const hsl    = rgbToHsl(avgR, avgG, avgB);
     currentHue   = hsl.h;
     currentSat   = hsl.s;
     currentLight = hsl.l;
+    currentMass  = weightTotal;
 
-    // Calculate luminance variance (complexity of what's under cursor)
-    const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
-    const variance = samples.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / samples.length;
-    currentVariance = Math.min(1, variance / 3000); // normalise 0–1
+    // Luminance variance = visual complexity under cursor
+    const mean = luminances.reduce((a, b) => a + b, 0) / luminances.length;
+    const variance = luminances.reduce(
+      (a, b) => a + Math.pow(b - mean, 2), 0
+    ) / luminances.length;
+    currentVariance = Math.min(1, variance / 3000);
 
-    // Update hue buffer for Organism concept
+    // Hue buffer for gesture tracking
     hueBuffer.push(currentHue);
     if (hueBuffer.length > HUE_BUFFER_SIZE) hueBuffer.shift();
 
-    // Broadcast state to server for Navigator concept
+    // Update running voice parameters in real time
+    if (isAudioReady) updateVoice();
+
+    // Broadcast state for Navigator concept
     broadcastState();
-  } else {
-    currentRed = currentGreen = currentBlue = 0;
-    currentHue = currentSat = currentLight = currentVariance = currentMass = 0;
   }
 }
 
 // ==========================================
-// 3. STATE BROADCAST (Navigator concept)
+// 3. STATE BROADCAST
 // ==========================================
-let lastBroadcast = 0;
+let roomToken      = "default";
+let collectiveTension = 0;
+let lastBroadcast  = 0;
+
 function broadcastState() {
   const now = Date.now();
-  if (now - lastBroadcast < 100) return; // throttle to 10/sec
+  if (now - lastBroadcast < 80) return;
   lastBroadcast = now;
   chrome.runtime.sendMessage({
     type: "SEND_TO_SERVER",
@@ -176,425 +184,423 @@ function broadcastState() {
 }
 
 // ==========================================
-// 4. NETWORK & AUDIO ARCHITECTURE
+// 4. SETTINGS
 // ==========================================
-let audioCtx, masterGain, reverbNode, reverbGain, dryGain;
-let isAudioReady  = false;
 let instrumentProfile = "atmosphere";
 let soundConcept      = "synesthete";
-let roomToken         = "default";
-let collectiveTension = 0;
-let collectiveStates  = [];
+let isAudioReady      = false;
 
-chrome.storage.local.get(['roomToken', 'instrumentProfile', 'soundConcept'], (data) => {
-  if (data.instrumentProfile) instrumentProfile = data.instrumentProfile;
-  if (data.soundConcept)      soundConcept      = data.soundConcept;
-  if (data.roomToken)         roomToken         = data.roomToken;
-});
-
-document.addEventListener('click', () => {
-  if (!isAudioReady) {
-    setupAudio();
-    isAudioReady = true;
-    console.log("Audio Engine Online.");
+chrome.storage.local.get(
+  ['roomToken', 'instrumentProfile', 'soundConcept'],
+  (data) => {
+    if (data.roomToken)         roomToken         = data.roomToken;
+    if (data.instrumentProfile) instrumentProfile = data.instrumentProfile;
+    if (data.soundConcept)      soundConcept      = data.soundConcept;
   }
-});
+);
+
+// ==========================================
+// 5. AUDIO ENGINE — NODES THAT RUN FOREVER
+// ==========================================
+let audioCtx;
+
+// Shared infrastructure
+let masterGain, reverbNode, reverbSend, drySend;
+
+// The continuously running voice nodes
+let carrierOsc, modulatorOsc, modGainNode;  // FM pair
+let filterNode;                              // Organism filter
+let ampLfo, ampLfoGain;                     // Amplitude LFO (pulse/tremolo)
+let tremoloLfo, tremoloLfoGain;             // Organism tremolo
+let voiceGain;                              // Master voice envelope
+let distortionNode;                         // Navigator waveshaper
+
+// Smoothing — prevents zipper noise when params update
+const SMOOTH = 0.05; // seconds for param ramps
 
 function setupAudio() {
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
+  // ── Master output ──
   masterGain = audioCtx.createGain();
-  masterGain.gain.value = 0.5;
+  masterGain.gain.value = 0.45;
   masterGain.connect(audioCtx.destination);
 
-  // Shared reverb for all concepts
+  // ── Reverb ──
   reverbNode = audioCtx.createConvolver();
-  reverbGain = audioCtx.createGain();
-  dryGain    = audioCtx.createGain();
-  reverbGain.gain.value = 0.3;
-  dryGain.gain.value    = 0.7;
+  reverbNode.buffer = buildReverbIR(3.0);
+  reverbSend = audioCtx.createGain();
+  drySend    = audioCtx.createGain();
+  reverbSend.gain.value = 0.25;
+  drySend.gain.value    = 0.75;
+  reverbNode.connect(reverbSend);
+  reverbSend.connect(masterGain);
+  drySend.connect(masterGain);
 
-  // Generate a simple reverb impulse response
-  buildReverb(2.5);
+  // ── FM oscillator pair ──
+  carrierOsc   = audioCtx.createOscillator();
+  modulatorOsc = audioCtx.createOscillator();
+  modGainNode  = audioCtx.createGain();
 
-  reverbNode.connect(reverbGain);
-  reverbGain.connect(masterGain);
-  dryGain.connect(masterGain);
-}
+  carrierOsc.type   = getCarrierWaveform();
+  modulatorOsc.type = 'sine';
+  carrierOsc.frequency.value   = 220;
+  modulatorOsc.frequency.value = 220;
+  modGainNode.gain.value       = 0;
 
-function buildReverb(duration) {
-  const rate    = audioCtx.sampleRate;
-  const length  = rate * duration;
-  const impulse = audioCtx.createBuffer(2, length, rate);
-  for (let c = 0; c < 2; c++) {
-    const channel = impulse.getChannelData(c);
-    for (let i = 0; i < length; i++) {
-      channel[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 2);
-    }
-  }
-  reverbNode.buffer = impulse;
-}
+  modulatorOsc.connect(modGainNode);
+  modGainNode.connect(carrierOsc.frequency);
 
-function connectNetwork() {
+  // ── Distortion (Navigator) ──
+  distortionNode = audioCtx.createWaveShaper();
+  distortionNode.oversample = '4x';
+  distortionNode.curve = makeDistortionCurve(0);
+
+  // ── Filter (Organism) ──
+  filterNode = audioCtx.createBiquadFilter();
+  filterNode.type            = 'lowpass';
+  filterNode.frequency.value = 2000;
+  filterNode.Q.value         = 2;
+
+  // ── Amplitude LFO — creates natural pulsing without a metronome ──
+  ampLfo     = audioCtx.createOscillator();
+  ampLfoGain = audioCtx.createGain();
+  ampLfo.frequency.value = 0.5; // starts slow, updated by variance
+  ampLfoGain.gain.value  = 0;   // starts silent
+  ampLfo.connect(ampLfoGain);
+
+  // ── Tremolo LFO (Organism) ──
+  tremoloLfo     = audioCtx.createOscillator();
+  tremoloLfoGain = audioCtx.createGain();
+  tremoloLfo.frequency.value = 4;
+  tremoloLfoGain.gain.value  = 0;
+  tremoloLfo.connect(tremoloLfoGain);
+
+  // ── Voice gain — LFO modulates this to create pulsing ──
+  voiceGain = audioCtx.createGain();
+  voiceGain.gain.value = 0; // silent until cursor moves
+
+  // Wire: carrier → filter → distortion → voiceGain → dry/reverb
+  carrierOsc.connect(filterNode);
+  filterNode.connect(distortionNode);
+  distortionNode.connect(voiceGain);
+
+  // LFOs modulate voiceGain to create pulsing and tremolo
+  ampLfoGain.connect(voiceGain.gain);
+  tremoloLfoGain.connect(voiceGain.gain);
+
+  voiceGain.connect(drySend);
+  voiceGain.connect(reverbNode);
+
+  // Start everything — they run forever, just silently when not in use
+  carrierOsc.start();
+  modulatorOsc.start();
+  ampLfo.start();
+  tremoloLfo.start();
+
+  // Network listener
   chrome.runtime.onMessage.addListener((message) => {
     if (message.type === "NETWORK_BEAT") {
-      const msg = JSON.parse(message.payload);
-      if (msg.type === 'BEAT' && msg.room === roomToken) {
-        onBeat();
-      }
-      if (msg.type === 'COLLECTIVE_STATE') {
-        collectiveTension = msg.tension;
-        collectiveStates  = msg.states;
-      }
+      try {
+        const msg = JSON.parse(message.payload);
+        if (msg.type === 'COLLECTIVE_STATE') {
+          collectiveTension = msg.tension || 0;
+        }
+      } catch (e) {}
     }
   });
+
+  isAudioReady = true;
+  console.log("Continuous audio engine online.");
 }
 
-document.addEventListener('click', () => {
-  if (!isAudioReady) connectNetwork();
-  else connectNetwork();
-}, { once: true });
+function getCarrierWaveform() {
+  switch (instrumentProfile) {
+    case 'grid':       return 'sine';
+    case 'weaver':     return 'triangle';
+    case 'atmosphere': return 'sawtooth';
+    default:           return 'sine';
+  }
+}
 
-// Actually connect network on first click
-document.addEventListener('click', () => {
-  connectNetwork();
-}, { once: true });
+function buildReverbIR(duration) {
+  const rate    = 44100;
+  const length  = rate * duration;
+  const buffer  = audioCtx.createBuffer(2, length, rate);
+  for (let c = 0; c < 2; c++) {
+    const ch = buffer.getChannelData(c);
+    for (let i = 0; i < length; i++) {
+      ch[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 1.5);
+    }
+  }
+  return buffer;
+}
+
+function makeDistortionCurve(amount) {
+  const n    = 256;
+  const curve = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x  = (i * 2) / n - 1;
+    curve[i] = amount === 0
+      ? x
+      : ((Math.PI + amount) * x) / (Math.PI + amount * Math.abs(x));
+  }
+  return curve;
+}
 
 // ==========================================
-// 5. BEAT HANDLER & DYNAMIC TEMPO
+// 6. THE CONTINUOUS UPDATE FUNCTION
+//    Called every time extractColors() runs
+//    (~every mousemove). All params smoothed.
 // ==========================================
-let beatInterval  = 500;
-let localBeatTimer = null;
+function updateVoice() {
+  const t = audioCtx.currentTime;
 
-function onBeat() {
-  if (currentMass === 0) return;
+  // ── Pitch from hue ──
+  const targetFreq = hueToFreq(currentHue);
+  carrierOsc.frequency.setTargetAtTime(targetFreq, t, SMOOTH * 3);
 
-  // Voice 1 (grid) controls tempo via variance
-  if (instrumentProfile === 'grid') {
-    beatInterval = 200 + (1 - currentVariance) * 600; // 200ms (busy) to 800ms (calm)
+  // ── Concept-specific parameter updates ──
+  switch (soundConcept) {
+    case 'synesthete': updateSynesthete(t, targetFreq); break;
+    case 'navigator':  updateNavigator(t, targetFreq);  break;
+    case 'organism':   updateOrganism(t, targetFreq);   break;
+    case 'combined':
+      updateSynesthete(t, targetFreq);
+      updateNavigator(t, targetFreq);
+      updateOrganism(t, targetFreq);
+      break;
   }
 
-  triggerInstrument();
+  // ── Volume: fade in when cursor is active, out when still ──
+  // voiceGain base level — LFOs will pulse around this
+  const baseVol = currentMass > 0 ? getBaseVolume() : 0;
+  voiceGain.gain.setTargetAtTime(baseVol, t, SMOOTH);
+
+  // ── Reverb depth from saturation ──
+  // Grey = cavernous reverb, vivid = dry
+  reverbSend.gain.setTargetAtTime(
+    0.1 + (1 - currentSat) * 0.6, t, SMOOTH
+  );
+  drySend.gain.setTargetAtTime(
+    0.3 + currentSat * 0.5, t, SMOOTH
+  );
 }
 
-// ==========================================
-// 6. HSL → MUSICAL HELPERS
-// ==========================================
-
-// Map hue (0-360) to a note in a pentatonic scale
-function hueToFreq(hue, octaveOffset = 0) {
-  // Pentatonic scale: C D E G A (intervals: 0,2,4,7,9)
-  const pentatonic = [0, 2, 4, 7, 9];
-  const baseFreq   = 130.81; // C3
-  const noteIndex  = Math.floor((hue / 360) * pentatonic.length);
-  const semitones  = pentatonic[noteIndex % pentatonic.length];
-  const octave     = Math.floor(currentLight * 3) + octaveOffset; // lightness → octave
-  return baseFreq * Math.pow(2, (semitones + octave * 12) / 12);
-}
-
-// Map hue to chromatic pitch (for Navigator)
-function hueToChromaticFreq(hue) {
-  const baseFreq = 130.81;
-  const semitone = Math.floor((hue / 360) * 12);
-  const octave   = Math.floor(currentLight * 2);
-  return baseFreq * Math.pow(2, (semitone + octave * 12) / 12);
-}
-
-// Create an FM pair (carrier + modulator)
-function createFMVoice(carrierFreq, modRatio, modIndex, waveform = 'sine') {
-  const carrier   = audioCtx.createOscillator();
-  const modulator = audioCtx.createOscillator();
-  const modGain   = audioCtx.createGain();
-  const env       = audioCtx.createGain();
-
-  carrier.type   = waveform;
-  modulator.type = 'sine';
-
-  const modFreq = carrierFreq * modRatio;
-  modulator.frequency.value = modFreq;
-  modGain.gain.value        = modFreq * modIndex;
-
-  carrier.frequency.value = carrierFreq;
-  modulator.connect(modGain);
-  modGain.connect(carrier.frequency);
-  carrier.connect(env);
-
-  return { carrier, modulator, env };
-}
-
-function routeToReverb(envNode) {
-  // Reverb depth from saturation
-  const wet = currentSat * 0.6;
-  const dry = 1 - wet;
-  const sendWet = audioCtx.createGain();
-  const sendDry = audioCtx.createGain();
-  sendWet.gain.value = wet;
-  sendDry.gain.value = dry;
-  envNode.connect(sendDry);
-  envNode.connect(reverbNode);
-  sendDry.connect(masterGain);
-}
-
-// ==========================================
-// 7. THE INSTRUMENT ROUTER
-// ==========================================
-function triggerInstrument() {
-  if (!audioCtx || currentMass === 0) return;
-
-  switch (soundConcept) {
-    case 'synesthete': triggerSynesthete(); break;
-    case 'navigator':  triggerNavigator();  break;
-    case 'organism':   triggerOrganism();   break;
-    case 'combined':
-      triggerSynesthete();
-      triggerNavigator();
-      triggerOrganism();
-      break;
+function getBaseVolume() {
+  switch (instrumentProfile) {
+    case 'grid':       return 0.5;
+    case 'weaver':     return 0.35;
+    case 'atmosphere': return 0.25;
+    default:           return 0.4;
   }
 }
 
 // ──────────────────────────────────────────
 // CONCEPT 2: SYNESTHETE
-// HSL → FM synthesis
-// Hue → pitch, Saturation → FM complexity, Lightness → register
+// Hue → pitch, Sat → FM depth, Light → register
+// Amplitude LFO rate from variance = natural pulse
 // ──────────────────────────────────────────
-function triggerSynesthete() {
-  const time  = audioCtx.currentTime;
-  const freq  = hueToFreq(currentHue);
+function updateSynesthete(t, freq) {
+  // FM modulation depth from saturation
+  // Low sat (grey) = pure tone, high sat (vivid) = complex metallic
+  const modIndex  = currentSat * 6;
+  const modFreq   = freq * getModRatio();
+  modulatorOsc.frequency.setTargetAtTime(modFreq, t, SMOOTH);
+  modGainNode.gain.setTargetAtTime(modFreq * modIndex, t, SMOOTH);
 
-  // Saturation drives FM modulation index: grey = pure, vivid = metallic
-  const modIndex = currentSat * 8;
+  // Amplitude LFO: variance drives pulse rate
+  // Busy visual = faster pulsing, flat visual = slow breathing
+  const lfoRate = 0.3 + currentVariance * 4; // 0.3–4.3 Hz
+  ampLfo.frequency.setTargetAtTime(lfoRate, t, SMOOTH * 2);
 
+  // LFO depth scales with lightness — bright pages pulse harder
+  const lfoDepth = 0.1 + currentLight * 0.3;
+  ampLfoGain.gain.setTargetAtTime(lfoDepth, t, SMOOTH);
+
+  // Keep filter open
+  filterNode.frequency.setTargetAtTime(6000, t, SMOOTH);
+  filterNode.Q.setTargetAtTime(1, t, SMOOTH);
+
+  // No distortion
+  distortionNode.curve = makeDistortionCurve(0);
+}
+
+function getModRatio() {
   switch (instrumentProfile) {
-    case 'grid': {
-      // Percussive FM bell — fast attack, quick decay
-      const { carrier, modulator, env } = createFMVoice(freq, 2.0, modIndex, 'sine');
-      routeToReverb(env);
-      env.gain.setValueAtTime(0.8, time);
-      env.gain.exponentialRampToValueAtTime(0.001, time + 0.3);
-      carrier.start(time);
-      modulator.start(time);
-      carrier.stop(time + 0.35);
-      modulator.stop(time + 0.35);
-      break;
-    }
-    case 'weaver': {
-      // Evolving FM organ — slower attack, medium sustain
-      const { carrier, modulator, env } = createFMVoice(freq * 0.5, 1.5, modIndex * 0.5, 'triangle');
-      routeToReverb(env);
-      env.gain.setValueAtTime(0, time);
-      env.gain.linearRampToValueAtTime(0.5, time + 0.08);
-      env.gain.exponentialRampToValueAtTime(0.001, time + 0.6);
-      carrier.start(time);
-      modulator.start(time);
-      carrier.stop(time + 0.65);
-      modulator.stop(time + 0.65);
-      break;
-    }
-    case 'atmosphere': {
-      // Deep FM drone — very slow attack and decay
-      const { carrier, modulator, env } = createFMVoice(freq * 0.25, 0.5, modIndex * 0.3, 'sawtooth');
-      routeToReverb(env);
-      env.gain.setValueAtTime(0, time);
-      env.gain.linearRampToValueAtTime(0.3, time + 0.4);
-      env.gain.linearRampToValueAtTime(0, time + 1.2);
-      carrier.start(time);
-      modulator.start(time);
-      carrier.stop(time + 1.3);
-      modulator.stop(time + 1.3);
-      break;
-    }
+    case 'grid':       return 2.0;
+    case 'weaver':     return 1.5;
+    case 'atmosphere': return 0.5;
+    default:           return 1.0;
   }
 }
 
 // ──────────────────────────────────────────
 // CONCEPT 3: NAVIGATOR
-// Collective tension between performers shapes timbre
-// Low tension = clean harmonics, high tension = distortion
+// Collective tension between performers
+// → distortion amount, filter brightness
 // ──────────────────────────────────────────
-function triggerNavigator() {
-  const time = audioCtx.currentTime;
-  const freq = hueToChromaticFreq(currentHue);
+function updateNavigator(t, freq) {
+  // Chromatic pitch instead of pentatonic
+  const chromaticFreq = hueToChromaticFreq(currentHue);
+  carrierOsc.frequency.setTargetAtTime(chromaticFreq, t, SMOOTH * 2);
 
-  // Tension drives waveshaper distortion amount
-  const waveshaper = audioCtx.createWaveShaper();
-  waveshaper.curve = makeDistortionCurve(collectiveTension * 400);
-  waveshaper.oversample = '4x';
+  // Tension → distortion
+  // All players on same hue = clean, all different = harsh
+  const distAmount = collectiveTension * 300;
+  distortionNode.curve = makeDistortionCurve(distAmount);
 
-  const osc = audioCtx.createOscillator();
-  const env = audioCtx.createGain();
+  // Tension also opens/closes filter
+  const cutoff = 400 + (1 - collectiveTension) * 5000;
+  filterNode.frequency.setTargetAtTime(cutoff, t, SMOOTH);
+  filterNode.Q.setTargetAtTime(1 + collectiveTension * 8, t, SMOOTH);
 
-  osc.frequency.value = freq;
-  osc.type = 'sine';
-  osc.connect(waveshaper);
-  waveshaper.connect(env);
+  // No FM modulation in Navigator
+  modGainNode.gain.setTargetAtTime(0, t, SMOOTH);
 
-  // Saturation controls reverb depth — vivid = dry, grey = cavernous
-  const reverbSend = audioCtx.createGain();
-  const drySend    = audioCtx.createGain();
-  reverbSend.gain.value = (1 - currentSat) * 0.8;
-  drySend.gain.value    = currentSat;
-  env.connect(drySend);
-  env.connect(reverbNode);
-  drySend.connect(masterGain);
-
-  switch (instrumentProfile) {
-    case 'grid': {
-      env.gain.setValueAtTime(0.7, time);
-      env.gain.exponentialRampToValueAtTime(0.001, time + 0.2);
-      osc.start(time);
-      osc.stop(time + 0.25);
-      break;
-    }
-    case 'weaver': {
-      env.gain.setValueAtTime(0, time);
-      env.gain.linearRampToValueAtTime(0.4, time + 0.05);
-      env.gain.exponentialRampToValueAtTime(0.001, time + 0.5);
-      osc.start(time);
-      osc.stop(time + 0.55);
-      break;
-    }
-    case 'atmosphere': {
-      env.gain.setValueAtTime(0, time);
-      env.gain.linearRampToValueAtTime(0.2, time + 0.3);
-      env.gain.linearRampToValueAtTime(0, time + 1.5);
-      osc.start(time);
-      osc.stop(time + 1.6);
-      break;
-    }
-  }
-}
-
-function makeDistortionCurve(amount) {
-  const samples = 256;
-  const curve   = new Float32Array(samples);
-  const deg     = Math.PI / 180;
-  for (let i = 0; i < samples; i++) {
-    const x  = (i * 2) / samples - 1;
-    curve[i] = ((3 + amount) * x * 20 * deg) / (Math.PI + amount * Math.abs(x));
-  }
-  return curve;
+  // Slow pulse from LFO regardless of variance
+  ampLfo.frequency.setTargetAtTime(
+    0.2 + collectiveTension * 2, t, SMOOTH * 3
+  );
+  ampLfoGain.gain.setTargetAtTime(0.15, t, SMOOTH);
 }
 
 // ──────────────────────────────────────────
 // CONCEPT 4: ORGANISM
-// Tracks cursor movement through color space
-// Velocity of hue change → filter cutoff
-// Direction of change → pitch direction
-// Variance → tremolo
+// Cursor velocity through color space
+// → filter cutoff, tremolo, pitch direction
 // ──────────────────────────────────────────
-function triggerOrganism() {
+function updateOrganism(t, freq) {
   if (hueBuffer.length < 2) return;
-  const time = audioCtx.currentTime;
 
-  // Calculate hue velocity (how fast color is changing)
+  // Calculate hue velocity and direction
   let totalDelta = 0;
-  let dirSum = 0;
+  let dirSum     = 0;
   for (let i = 1; i < hueBuffer.length; i++) {
     let delta = hueBuffer[i] - hueBuffer[i - 1];
-    // Handle wraparound on the color wheel
     if (delta > 180)  delta -= 360;
     if (delta < -180) delta += 360;
     totalDelta += Math.abs(delta);
     dirSum     += Math.sign(delta);
   }
+  const velocity = Math.min(1, totalDelta / (hueBuffer.length * 25));
+  const dir      = Math.sign(dirSum);
 
-  const hueVelocity = Math.min(1, totalDelta / (hueBuffer.length * 30)); // 0–1
-  const hueDir      = Math.sign(dirSum); // -1, 0, or 1
+  // Direction shifts pitch up or down a fourth
+  const directedFreq = freq * (dir >= 0 ? 1 : 0.75);
+  carrierOsc.frequency.setTargetAtTime(directedFreq, t, SMOOTH * 4);
 
-  // Base frequency, direction affects pitch up/down
-  const baseFreq = hueToFreq(currentHue);
-  const freq     = baseFreq * (hueDir >= 0 ? 1 : 0.75); // down a fourth if moving backwards
-
-  // Filter cutoff: slow movement = dark/muffled, fast = bright/open
-  const cutoff = 200 + hueVelocity * 4000;
-
-  const osc    = audioCtx.createOscillator();
-  const filter = audioCtx.createBiquadFilter();
-  const tremolo = audioCtx.createGain();
-  const env    = audioCtx.createGain();
-
-  filter.type            = 'lowpass';
-  filter.frequency.value = cutoff;
-  filter.Q.value         = 2 + currentSat * 8;
+  // Fast movement = bright filter, stillness = dark
+  const cutoff = 150 + velocity * 5000;
+  filterNode.frequency.setTargetAtTime(cutoff, t, SMOOTH);
+  filterNode.Q.setTargetAtTime(1 + currentSat * 6, t, SMOOTH);
 
   // Tremolo rate from variance
-  const tremoloOsc  = audioCtx.createOscillator();
-  const tremoloGain = audioCtx.createGain();
-  tremoloOsc.frequency.value = 2 + currentVariance * 12; // 2–14 Hz
-  tremoloGain.gain.value     = currentVariance * 0.5;
-  tremoloOsc.connect(tremoloGain);
-  tremoloGain.connect(tremolo.gain);
+  const tremoloRate = 1 + currentVariance * 10;
+  tremoloLfo.frequency.setTargetAtTime(tremoloRate, t, SMOOTH);
+  tremoloLfoGain.gain.setTargetAtTime(
+    currentVariance * 0.25, t, SMOOTH
+  );
 
-  osc.frequency.value = freq;
-  osc.type = 'triangle';
-  osc.connect(filter);
-  filter.connect(tremolo);
-  tremolo.connect(env);
+  // Amplitude LFO tied to velocity
+  // Still cursor = slow breathing, fast movement = faster pulse
+  ampLfo.frequency.setTargetAtTime(
+    0.2 + velocity * 3, t, SMOOTH * 2
+  );
+  ampLfoGain.gain.setTargetAtTime(0.1 + velocity * 0.2, t, SMOOTH);
 
-  // Route with reverb
-  const reverbSend = audioCtx.createGain();
-  const drySend    = audioCtx.createGain();
-  reverbSend.gain.value = currentVariance * 0.5;
-  drySend.gain.value    = 1 - reverbSend.gain.value;
-  env.connect(drySend);
-  env.connect(reverbNode);
-  drySend.connect(masterGain);
-
-  switch (instrumentProfile) {
-    case 'grid': {
-      // Fast attack when moving fast, longer when slow
-      const decay = 0.1 + (1 - hueVelocity) * 0.4;
-      env.gain.setValueAtTime(0.7, time);
-      env.gain.exponentialRampToValueAtTime(0.001, time + decay);
-      osc.start(time);
-      tremoloOsc.start(time);
-      osc.stop(time + decay + 0.05);
-      tremoloOsc.stop(time + decay + 0.05);
-      break;
-    }
-    case 'weaver': {
-      const duration = 0.2 + (1 - hueVelocity) * 0.5;
-      env.gain.setValueAtTime(0, time);
-      env.gain.linearRampToValueAtTime(0.4, time + 0.03);
-      env.gain.exponentialRampToValueAtTime(0.001, time + duration);
-      osc.start(time);
-      tremoloOsc.start(time);
-      osc.stop(time + duration + 0.05);
-      tremoloOsc.stop(time + duration + 0.05);
-      break;
-    }
-    case 'atmosphere': {
-      const duration = 0.8 + (1 - hueVelocity) * 1.5;
-      env.gain.setValueAtTime(0, time);
-      env.gain.linearRampToValueAtTime(0.25, time + 0.2);
-      env.gain.linearRampToValueAtTime(0, time + duration);
-      osc.start(time);
-      tremoloOsc.start(time);
-      osc.stop(time + duration + 0.05);
-      tremoloOsc.stop(time + duration + 0.05);
-      break;
-    }
-  }
+  // No FM, no distortion in pure Organism
+  modGainNode.gain.setTargetAtTime(0, t, SMOOTH);
+  distortionNode.curve = makeDistortionCurve(0);
 }
 
 // ==========================================
-// 8. KEYBOARD CONTROLS
+// 7. MUSICAL HELPERS
+// ==========================================
+
+// Pentatonic scale, hue cycles through it, lightness sets octave
+function hueToFreq(hue) {
+  const pentatonic  = [0, 2, 4, 7, 9];
+  const baseFreq    = 65.41; // C2 — low base for all instruments
+  const noteIndex   = Math.floor((hue / 360) * pentatonic.length);
+  const semitones   = pentatonic[noteIndex % pentatonic.length];
+  const octave      = Math.floor(currentLight * 3); // 0–2 octaves up
+
+  // Each instrument lives in a different register
+  const instrumentOffset = {
+    grid:       24, // C4 range
+    weaver:     12, // C3 range
+    atmosphere:  0  // C2 range
+  }[instrumentProfile] || 12;
+
+  return baseFreq * Math.pow(2, (semitones + octave * 12 + instrumentOffset) / 12);
+}
+
+// Chromatic for Navigator — every hue degree = a distinct semitone
+function hueToChromaticFreq(hue) {
+  const baseFreq = 65.41;
+  const semitone = Math.floor((hue / 360) * 12);
+  const octave   = Math.floor(currentLight * 2);
+  const instrumentOffset = {
+    grid:       24,
+    weaver:     12,
+    atmosphere:  0
+  }[instrumentProfile] || 12;
+  return baseFreq * Math.pow(2,
+    (semitone + octave * 12 + instrumentOffset) / 12
+  );
+}
+
+// ==========================================
+// 8. FADE OUT WHEN CURSOR IS IDLE
+// ==========================================
+let idleTimer = null;
+
+document.addEventListener('mousemove', () => {
+  clearTimeout(idleTimer);
+  // If cursor stops moving, fade voice out after 2 seconds
+  idleTimer = setTimeout(() => {
+    if (isAudioReady) {
+      voiceGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.3);
+    }
+  }, 2000);
+});
+
+// ==========================================
+// 9. INIT ON FIRST CLICK
+// ==========================================
+document.addEventListener('click', () => {
+  if (!isAudioReady) {
+    setupAudio();
+  }
+}, { once: true });
+
+// ==========================================
+// 10. KEYBOARD CONTROLS
 // ==========================================
 document.addEventListener('keydown', (e) => {
-  const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
-  if (tag === 'input' || tag === 'textarea' || document.activeElement.isContentEditable) return;
+  const tag = document.activeElement
+    ? document.activeElement.tagName.toLowerCase() : '';
+  if (
+    tag === 'input' ||
+    tag === 'textarea' ||
+    document.activeElement.isContentEditable
+  ) return;
 
   let changed = false;
   if (e.key === ']') { currentRadius  = Math.min(300, currentRadius + 5);  changed = true; }
   if (e.key === '[') { currentRadius  = Math.max(10,  currentRadius - 5);  changed = true; }
-  if (e.key === '=' || e.key === '+') { currentFeather = Math.min(1.0, currentFeather + 0.05); changed = true; }
-  if (e.key === '-') { currentFeather = Math.max(0.0, currentFeather - 0.05); changed = true; }
+  if (e.key === '=' || e.key === '+') {
+    currentFeather = Math.min(1.0, currentFeather + 0.05); changed = true;
+  }
+  if (e.key === '-') {
+    currentFeather = Math.max(0.0, currentFeather - 0.05); changed = true;
+  }
   if (changed) updateCursorVisuals();
 });
 
 // ==========================================
-// 9. INIT
+// 11. INIT
 // ==========================================
 if (document.body) initCursor();
 else document.addEventListener('DOMContentLoaded', initCursor);
