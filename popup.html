@@ -3,69 +3,214 @@
 <head>
 <style>
 body {
-  width: 250px;
+  width: 280px;
   font-family: monospace;
-  background-color: #111;
+  background-color: #0a0a0a;
   color: #fff;
-  padding: 15px;
+  padding: 16px;
   margin: 0;
 }
-h2 { margin-top: 0; color: #ff3333; font-size: 18px; text-transform: uppercase; }
-label { display: block; margin-top: 15px; font-size: 12px; color: #aaa; }
-input, select {
+
+h2 {
+  margin: 0 0 16px 0;
+  color: #ff3333;
+  font-size: 16px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+label {
+  display: block;
+  margin-top: 14px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: #888;
+  text-transform: uppercase;
+}
+
+input[type=text] {
   width: 100%;
   box-sizing: border-box;
   padding: 8px;
   margin-top: 5px;
-  background: #222;
+  background: #1a1a1a;
   color: #fff;
-  border: 1px solid #555;
+  border: 1px solid #333;
   font-family: monospace;
+  font-size: 12px;
 }
+
+.section {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #1a1a1a;
+}
+
+.section-label {
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: #888;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.instrument {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  border: 1px solid #1a1a1a;
+  cursor: pointer;
+  transition: 0.06s;
+  user-select: none;
+}
+
+.instrument:hover {
+  border-color: #444;
+}
+
+.instrument.selected {
+  border-color: #fff;
+  background: #1a1a1a;
+}
+
+.instrument.locked {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.instrument.locked:hover {
+  border-color: #1a1a1a;
+}
+
+.inst-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 10px;
+  flex-shrink: 0;
+}
+
+.inst-dot.tempo { background: #88ffcc; }
+.inst-dot.tonal { background: #ffaa88; }
+.inst-dot.air   { background: #aabbff; }
+.inst-dot.noise { background: #ffff88; }
+
+.inst-name {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  flex: 1;
+}
+
+.inst-role {
+  font-size: 9px;
+  color: #666;
+  letter-spacing: 0.05em;
+}
+
+.inst-locked-by {
+  font-size: 9px;
+  color: #ff6666;
+  margin-left: 6px;
+}
+
+.inst-shared {
+  font-size: 9px;
+  color: #66cc88;
+  margin-left: 6px;
+}
+
 button {
   width: 100%;
-  margin-top: 20px;
+  margin-top: 18px;
   padding: 10px;
   background-color: #ff3333;
   color: #fff;
   border: none;
   font-weight: bold;
   cursor: pointer;
+  letter-spacing: 0.15em;
+  font-size: 11px;
+  font-family: monospace;
 }
-button:hover { background-color: #ff6666; }
-#status { margin-top: 10px; font-size: 12px; color: #00ff00; text-align: center; display: none; }
-.concept-desc {
-  margin-top: 6px;
+
+button:hover {
+  background-color: #ff6666;
+}
+
+#status {
+  margin-top: 10px;
   font-size: 10px;
-  color: #666;
-  line-height: 1.4;
+  color: #66cc88;
+  text-align: center;
+  display: none;
+  letter-spacing: 0.1em;
+}
+
+#connection {
+  font-size: 9px;
+  color: #444;
+  text-align: center;
+  margin-top: 8px;
+  letter-spacing: 0.1em;
+}
+
+#connection.connected { color: #66cc88; }
+#connection.disconnected { color: #ff6666; }
+
+#myId {
+  font-size: 9px;
+  color: #555;
+  margin-top: 4px;
+  text-align: center;
+  letter-spacing: 0.08em;
 }
 </style>
 </head>
 <body>
+
 <h2>Glitch Orchestra</h2>
 
-<label for="roomCode">SESSION TOKEN</label>
+<label for="roomCode">Session Token</label>
 <input type="text" id="roomCode" placeholder="e.g. JODI24">
 
-<label for="instrument">INSTRUMENT</label>
-<select id="instrument">
-  <option value="grid">Voice 1: The Grid (Rhythm)</option>
-  <option value="weaver">Voice 2: The Weaver (Arp)</option>
-  <option value="atmosphere">Voice 3: Atmosphere (Drone)</option>
-</select>
+<div class="section">
+  <div class="section-label">Choose Your Instruments</div>
 
-<label for="concept">SOUND CONCEPT</label>
-<select id="concept">
-  <option value="synesthete">Synesthete — FM synthesis, HSL mapped</option>
-  <option value="navigator">Navigator — collective harmonic tension</option>
-  <option value="organism">Organism — gesture & movement driven</option>
-  <option value="combined">Combined — all three layered</option>
-</select>
-<div class="concept-desc" id="conceptDesc"></div>
+  <div class="instrument" id="inst-tempo" data-inst="tempo">
+    <div class="inst-dot tempo"></div>
+    <div class="inst-name">Tempo + Sub</div>
+    <div class="inst-role">solo</div>
+    <div class="inst-locked-by" id="lock-tempo"></div>
+  </div>
 
-<button id="saveBtn">SYNC & START</button>
-<div id="status">Settings Saved! Refresh webpage.</div>
+  <div class="instrument" id="inst-tonal" data-inst="tonal">
+    <div class="inst-dot tonal"></div>
+    <div class="inst-name">Tonal + Air</div>
+    <div class="inst-role">shared</div>
+    <div class="inst-shared" id="share-tonal"></div>
+  </div>
+
+  <div class="instrument" id="inst-air" data-inst="air">
+    <div class="inst-dot air"></div>
+    <div class="inst-name">Air</div>
+    <div class="inst-role">shared</div>
+    <div class="inst-shared" id="share-air"></div>
+  </div>
+
+  <div class="instrument" id="inst-noise" data-inst="noise">
+    <div class="inst-dot noise"></div>
+    <div class="inst-name">Noise + Texture</div>
+    <div class="inst-role">shared</div>
+    <div class="inst-shared" id="share-noise"></div>
+  </div>
+</div>
+
+<button id="saveBtn">Sync &amp; Start</button>
+<div id="status">Settings saved! Refresh webpage.</div>
+<div id="connection" class="disconnected">Connecting…</div>
+<div id="myId"></div>
+
 <script src="popup.js"></script>
 </body>
 </html>

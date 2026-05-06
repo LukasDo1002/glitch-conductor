@@ -1,11 +1,11 @@
 // ==========================================
 // 1. VISUAL CURSOR & CAMERA SETUP
 // ==========================================
-let currentRadius = 80;
+let currentRadius  = 80;
 let currentFeather = 0.5;
-let hiddenCanvas = document.createElement('canvas');
-let hiddenCtx = hiddenCanvas.getContext('2d', { willReadFrequently: true });
-let imgData = null;
+let hiddenCanvas   = document.createElement('canvas');
+let hiddenCtx      = hiddenCanvas.getContext('2d', { willReadFrequently: true });
+let imgData        = null;
 let scaleX = 1, scaleY = 1;
 
 function updateCursorVisuals() {
@@ -65,26 +65,23 @@ function takeSnapshot() {
 }
 
 // ==========================================
-// 2. COLOR EXTRACTION — RGB + HSL + VARIANCE
+// 2. COLOR EXTRACTION → HSL + VARIANCE
 // ==========================================
-let currentHue      = 0;
-let currentSat      = 0;
-let currentLight    = 0;
-let currentVariance = 0;
-let currentMass     = 0;
-
-const HUE_BUFFER_SIZE = 30;
-let hueBuffer = [];
+let myCursor = {
+  x:        0.5,  // 0-1, normalized X position on screen
+  hue:      0,
+  sat:      0,
+  light:    0,
+  variance: 0,
+  rgb:      '0,0,0'
+};
 
 function rgbToHsl(r, g, b) {
   r /= 255; g /= 255; b /= 255;
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  let h, s;
-  const l = (max + min) / 2;
-  if (max === min) {
-    h = s = 0;
-  } else {
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h, s; const l = (max + min) / 2;
+  if (max === min) { h = s = 0; }
+  else {
     const d = max - min;
     s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
     switch (max) {
@@ -111,20 +108,18 @@ function extractColors(mouseX, mouseY) {
 
   for (let x = xMin; x < xMax; x += 3) {
     for (let y = yMin; y < yMax; y += 3) {
-      const dist = Math.sqrt(
-        Math.pow(mappedX - x, 2) + Math.pow(mappedY - y, 2)
-      );
+      const dist = Math.sqrt((mappedX-x)**2 + (mappedY-y)**2);
       if (dist <= mappedRadius) {
         const weight = 1.0 - (dist / mappedRadius) * currentFeather;
         const idx    = (y * hiddenCanvas.width + x) * 4;
-        sumR += imgData[idx]     * weight;
-        sumG += imgData[idx + 1] * weight;
-        sumB += imgData[idx + 2] * weight;
+        sumR += imgData[idx]   * weight;
+        sumG += imgData[idx+1] * weight;
+        sumB += imgData[idx+2] * weight;
         weightTotal += weight;
         luminances.push(
-          imgData[idx]     * 0.299 +
-          imgData[idx + 1] * 0.587 +
-          imgData[idx + 2] * 0.114
+          imgData[idx]   * 0.299 +
+          imgData[idx+1] * 0.587 +
+          imgData[idx+2] * 0.114
         );
       }
     }
@@ -134,458 +129,388 @@ function extractColors(mouseX, mouseY) {
     const avgR = sumR / weightTotal;
     const avgG = sumG / weightTotal;
     const avgB = sumB / weightTotal;
+    const hsl  = rgbToHsl(avgR, avgG, avgB);
 
-    const hsl    = rgbToHsl(avgR, avgG, avgB);
-    currentHue   = hsl.h;
-    currentSat   = hsl.s;
-    currentLight = hsl.l;
-    currentMass  = weightTotal;
+    const mean = luminances.reduce((a,b)=>a+b, 0) / luminances.length;
+    const vari = luminances.reduce((a,b)=>a+(b-mean)**2, 0) / luminances.length;
 
-    // Luminance variance = visual complexity under cursor
-    const mean = luminances.reduce((a, b) => a + b, 0) / luminances.length;
-    const variance = luminances.reduce(
-      (a, b) => a + Math.pow(b - mean, 2), 0
-    ) / luminances.length;
-    currentVariance = Math.min(1, variance / 3000);
+    myCursor.x        = mouseX / window.innerWidth;
+    myCursor.hue      = hsl.h;
+    myCursor.sat      = hsl.s;
+    myCursor.light    = hsl.l;
+    myCursor.variance = Math.min(1, vari / 1200);
+    myCursor.rgb      = `${Math.round(avgR)},${Math.round(avgG)},${Math.round(avgB)}`;
 
-    // Hue buffer for gesture tracking
-    hueBuffer.push(currentHue);
-    if (hueBuffer.length > HUE_BUFFER_SIZE) hueBuffer.shift();
-
-    // Update running voice parameters in real time
-    if (isAudioReady) updateVoice();
-
-    // Broadcast state for Navigator concept
-    broadcastState();
+    // Send to server (throttled in background.js)
+    chrome.runtime.sendMessage({
+      type: "SEND_CURSOR_STATE",
+      payload: myCursor
+    }).catch(() => {});
   }
 }
 
 // ==========================================
-// 3. STATE BROADCAST
+// 3. SETTINGS & ROLE STATE
 // ==========================================
-let roomToken      = "default";
-let collectiveTension = 0;
-let lastBroadcast  = 0;
+let myId            = null;
+let myInstruments   = new Set();
+let allCursorStates = []; // includes my own + all other performers
+let roomToken       = "default";
 
-function broadcastState() {
-  const now = Date.now();
-  if (now - lastBroadcast < 2000) return;
-  lastBroadcast = now;
-  chrome.runtime.sendMessage({
-    type: "SEND_TO_SERVER",
-    payload: JSON.stringify({
-      type:  'CLIENT_STATE',
-      hue:   currentHue,
-      sat:   currentSat,
-      light: currentLight,
-      room:  roomToken
-    })
-  });
-}
-
-// ==========================================
-// 4. SETTINGS
-// ==========================================
-let instrumentProfile = "atmosphere";
-let soundConcept      = "synesthete";
-let isAudioReady      = false;
-
-chrome.storage.local.get(
-  ['roomToken', 'instrumentProfile', 'soundConcept'],
-  (data) => {
-    if (data.roomToken)         roomToken         = data.roomToken;
-    if (data.instrumentProfile) instrumentProfile = data.instrumentProfile;
-    if (data.soundConcept)      soundConcept      = data.soundConcept;
-  }
-);
-
-// ==========================================
-// 5. AUDIO ENGINE — NODES THAT RUN FOREVER
-// ==========================================
-let audioCtx;
-
-// Shared infrastructure
-let masterGain, reverbNode, reverbSend, drySend;
-
-// The continuously running voice nodes
-let carrierOsc, modulatorOsc, modGainNode;  // FM pair
-let filterNode;                              // Organism filter
-let ampLfo, ampLfoGain;                     // Amplitude LFO (pulse/tremolo)
-let tremoloLfo, tremoloLfoGain;             // Organism tremolo
-let voiceGain;                              // Master voice envelope
-let distortionNode;                         // Navigator waveshaper
-
-// Smoothing — prevents zipper noise when params update
-const SMOOTH = 0.05; // seconds for param ramps
-
-function setupAudio() {
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
-  // ── Master output ──
-  masterGain = audioCtx.createGain();
-  masterGain.gain.value = 0.45;
-  masterGain.connect(audioCtx.destination);
-
-  // ── Reverb ──
-  reverbNode = audioCtx.createConvolver();
-  reverbNode.buffer = buildReverbIR(3.0);
-  reverbSend = audioCtx.createGain();
-  drySend    = audioCtx.createGain();
-  reverbSend.gain.value = 0.25;
-  drySend.gain.value    = 0.75;
-  reverbNode.connect(reverbSend);
-  reverbSend.connect(masterGain);
-  drySend.connect(masterGain);
-
-  // ── FM oscillator pair ──
-  carrierOsc   = audioCtx.createOscillator();
-  modulatorOsc = audioCtx.createOscillator();
-  modGainNode  = audioCtx.createGain();
-
-  carrierOsc.type   = getCarrierWaveform();
-  modulatorOsc.type = 'sine';
-  carrierOsc.frequency.value   = 220;
-  modulatorOsc.frequency.value = 220;
-  modGainNode.gain.value       = 0;
-
-  modulatorOsc.connect(modGainNode);
-  modGainNode.connect(carrierOsc.frequency);
-
-  // ── Distortion (Navigator) ──
-  distortionNode = audioCtx.createWaveShaper();
-  distortionNode.oversample = '4x';
-  distortionNode.curve = makeDistortionCurve(0);
-
-  // ── Filter (Organism) ──
-  filterNode = audioCtx.createBiquadFilter();
-  filterNode.type            = 'lowpass';
-  filterNode.frequency.value = 2000;
-  filterNode.Q.value         = 2;
-
-  // ── Amplitude LFO — creates natural pulsing without a metronome ──
-  ampLfo     = audioCtx.createOscillator();
-  ampLfoGain = audioCtx.createGain();
-  ampLfo.frequency.value = 0.5; // starts slow, updated by variance
-  ampLfoGain.gain.value  = 0;   // starts silent
-  ampLfo.connect(ampLfoGain);
-
-  // ── Tremolo LFO (Organism) ──
-  tremoloLfo     = audioCtx.createOscillator();
-  tremoloLfoGain = audioCtx.createGain();
-  tremoloLfo.frequency.value = 4;
-  tremoloLfoGain.gain.value  = 0;
-  tremoloLfo.connect(tremoloLfoGain);
-
-  // ── Voice gain — LFO modulates this to create pulsing ──
-  voiceGain = audioCtx.createGain();
-  voiceGain.gain.value = 0; // silent until cursor moves
-
-  // Wire: carrier → filter → distortion → voiceGain → dry/reverb
-  carrierOsc.connect(filterNode);
-  filterNode.connect(distortionNode);
-  distortionNode.connect(voiceGain);
-
-  // LFOs modulate voiceGain to create pulsing and tremolo
-  ampLfoGain.connect(voiceGain.gain);
-  tremoloLfoGain.connect(voiceGain.gain);
-
-  voiceGain.connect(drySend);
-  voiceGain.connect(reverbNode);
-
-  // Start everything — they run forever, just silently when not in use
-  carrierOsc.start();
-  modulatorOsc.start();
-  ampLfo.start();
-  tremoloLfo.start();
-
-  // Network listener
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message.type === "NETWORK_BEAT") {
-      try {
-        const msg = JSON.parse(message.payload);
-        if (msg.type === 'COLLECTIVE_STATE') {
-          collectiveTension = msg.tension || 0;
-        }
-      } catch (e) {}
-    }
-  });
-
-  isAudioReady = true;
-  console.log("Continuous audio engine online.");
-}
-
-function getCarrierWaveform() {
-  switch (instrumentProfile) {
-    case 'grid':       return 'sine';
-    case 'weaver':     return 'triangle';
-    case 'atmosphere': return 'sawtooth';
-    default:           return 'sine';
-  }
-}
-
-function buildReverbIR(duration) {
-  const rate   = audioCtx.sampleRate;  // was hardcoded 44100
-  const length = Math.floor(rate * duration);
-  const buffer = audioCtx.createBuffer(2, length, rate);
-  for (let c = 0; c < 2; c++) {
-    const ch = buffer.getChannelData(c);
-    for (let i = 0; i < length; i++) {
-      ch[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 1.5);
-    }
-  }
-  return buffer;
-}
-
-function makeDistortionCurve(amount) {
-  const n    = 256;
-  const curve = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const x  = (i * 2) / n - 1;
-    curve[i] = amount === 0
-      ? x
-      : ((Math.PI + amount) * x) / (Math.PI + amount * Math.abs(x));
-  }
-  return curve;
-}
-
-// ==========================================
-// 6. THE CONTINUOUS UPDATE FUNCTION
-//    Called every time extractColors() runs
-//    (~every mousemove). All params smoothed.
-// ==========================================
-function updateVoice() {
-  const t = audioCtx.currentTime;
-
-  // ── Pitch from hue ──
-  const targetFreq = hueToFreq(currentHue);
-  carrierOsc.frequency.setTargetAtTime(targetFreq, t, SMOOTH * 3);
-
-  // ── Concept-specific parameter updates ──
-  switch (soundConcept) {
-    case 'synesthete': updateSynesthete(t, targetFreq); break;
-    case 'navigator':  updateNavigator(t, targetFreq);  break;
-    case 'organism':   updateOrganism(t, targetFreq);   break;
-    case 'combined':
-      updateSynesthete(t, targetFreq);
-      updateNavigator(t, targetFreq);
-      updateOrganism(t, targetFreq);
-      break;
-  }
-
-  // ── Volume: fade in when cursor is active, out when still ──
-  // voiceGain base level — LFOs will pulse around this
-  const baseVol = currentMass > 0 ? getBaseVolume() : 0;
-  voiceGain.gain.setTargetAtTime(baseVol, t, SMOOTH);
-
-  // ── Reverb depth from saturation ──
-  // Grey = cavernous reverb, vivid = dry
-  reverbSend.gain.setTargetAtTime(
-    0.1 + (1 - currentSat) * 0.6, t, SMOOTH
-  );
-  drySend.gain.setTargetAtTime(
-    0.3 + currentSat * 0.5, t, SMOOTH
-  );
-}
-
-function getBaseVolume() {
-  switch (instrumentProfile) {
-    case 'grid':       return 0.5;
-    case 'weaver':     return 0.35;
-    case 'atmosphere': return 0.25;
-    default:           return 0.4;
-  }
-}
-
-// ──────────────────────────────────────────
-// CONCEPT 2: SYNESTHETE
-// Hue → pitch, Sat → FM depth, Light → register
-// Amplitude LFO rate from variance = natural pulse
-// ──────────────────────────────────────────
-function updateSynesthete(t, freq) {
-  // FM modulation depth from saturation
-  // Low sat (grey) = pure tone, high sat (vivid) = complex metallic
-  const modIndex  = currentSat * 6;
-  const modFreq   = freq * getModRatio();
-  modulatorOsc.frequency.setTargetAtTime(modFreq, t, SMOOTH);
-  modGainNode.gain.setTargetAtTime(modFreq * modIndex, t, SMOOTH);
-
-  // Amplitude LFO: variance drives pulse rate
-  // Busy visual = faster pulsing, flat visual = slow breathing
-  const lfoRate = 0.3 + currentVariance * 4; // 0.3–4.3 Hz
-  ampLfo.frequency.setTargetAtTime(lfoRate, t, SMOOTH * 2);
-
-  // LFO depth scales with lightness — bright pages pulse harder
-  const lfoDepth = 0.1 + currentLight * 0.3;
-  ampLfoGain.gain.setTargetAtTime(lfoDepth, t, SMOOTH);
-
-  // Keep filter open
-  filterNode.frequency.setTargetAtTime(6000, t, SMOOTH);
-  filterNode.Q.setTargetAtTime(1, t, SMOOTH);
-
-  // No distortion
-  distortionNode.curve = makeDistortionCurve(0);
-}
-
-function getModRatio() {
-  switch (instrumentProfile) {
-    case 'grid':       return 2.0;
-    case 'weaver':     return 1.5;
-    case 'atmosphere': return 0.5;
-    default:           return 1.0;
-  }
-}
-
-// ──────────────────────────────────────────
-// CONCEPT 3: NAVIGATOR
-// Collective tension between performers
-// → distortion amount, filter brightness
-// ──────────────────────────────────────────
-function updateNavigator(t, freq) {
-  // Chromatic pitch instead of pentatonic
-  const chromaticFreq = hueToChromaticFreq(currentHue);
-  carrierOsc.frequency.setTargetAtTime(chromaticFreq, t, SMOOTH * 2);
-
-  // Tension → distortion
-  // All players on same hue = clean, all different = harsh
-  const distAmount = collectiveTension * 300;
-  distortionNode.curve = makeDistortionCurve(distAmount);
-
-  // Tension also opens/closes filter
-  const cutoff = 400 + (1 - collectiveTension) * 5000;
-  filterNode.frequency.setTargetAtTime(cutoff, t, SMOOTH);
-  filterNode.Q.setTargetAtTime(1 + collectiveTension * 8, t, SMOOTH);
-
-  // No FM modulation in Navigator
-  modGainNode.gain.setTargetAtTime(0, t, SMOOTH);
-
-  // Slow pulse from LFO regardless of variance
-  ampLfo.frequency.setTargetAtTime(
-    0.2 + collectiveTension * 2, t, SMOOTH * 3
-  );
-  ampLfoGain.gain.setTargetAtTime(0.15, t, SMOOTH);
-}
-
-// ──────────────────────────────────────────
-// CONCEPT 4: ORGANISM
-// Cursor velocity through color space
-// → filter cutoff, tremolo, pitch direction
-// ──────────────────────────────────────────
-function updateOrganism(t, freq) {
-  if (hueBuffer.length < 2) return;
-
-  // Calculate hue velocity and direction
-  let totalDelta = 0;
-  let dirSum     = 0;
-  for (let i = 1; i < hueBuffer.length; i++) {
-    let delta = hueBuffer[i] - hueBuffer[i - 1];
-    if (delta > 180)  delta -= 360;
-    if (delta < -180) delta += 360;
-    totalDelta += Math.abs(delta);
-    dirSum     += Math.sign(delta);
-  }
-  const velocity = Math.min(1, totalDelta / (hueBuffer.length * 25));
-  const dir      = Math.sign(dirSum);
-
-  // Direction shifts pitch up or down a fourth
-  const directedFreq = freq * (dir >= 0 ? 1 : 0.75);
-  carrierOsc.frequency.setTargetAtTime(directedFreq, t, SMOOTH * 4);
-
-  // Fast movement = bright filter, stillness = dark
-  const cutoff = 150 + velocity * 5000;
-  filterNode.frequency.setTargetAtTime(cutoff, t, SMOOTH);
-  filterNode.Q.setTargetAtTime(1 + currentSat * 6, t, SMOOTH);
-
-  // Tremolo rate from variance
-  const tremoloRate = 1 + currentVariance * 10;
-  tremoloLfo.frequency.setTargetAtTime(tremoloRate, t, SMOOTH);
-  tremoloLfoGain.gain.setTargetAtTime(
-    currentVariance * 0.25, t, SMOOTH
-  );
-
-  // Amplitude LFO tied to velocity
-  // Still cursor = slow breathing, fast movement = faster pulse
-  ampLfo.frequency.setTargetAtTime(
-    0.2 + velocity * 3, t, SMOOTH * 2
-  );
-  ampLfoGain.gain.setTargetAtTime(0.1 + velocity * 0.2, t, SMOOTH);
-
-  // No FM, no distortion in pure Organism
-  modGainNode.gain.setTargetAtTime(0, t, SMOOTH);
-  distortionNode.curve = makeDistortionCurve(0);
-}
-
-// ==========================================
-// 7. MUSICAL HELPERS
-// ==========================================
-
-// Pentatonic scale, hue cycles through it, lightness sets octave
-function hueToFreq(hue) {
-  const pentatonic  = [0, 2, 4, 7, 9];
-  const baseFreq    = 65.41; // C2 — low base for all instruments
-  const noteIndex   = Math.floor((hue / 360) * pentatonic.length);
-  const semitones   = pentatonic[noteIndex % pentatonic.length];
-  const octave      = Math.floor(currentLight * 3); // 0–2 octaves up
-
-  // Each instrument lives in a different register
-  const instrumentOffset = {
-    grid:       24, // C4 range
-    weaver:     12, // C3 range
-    atmosphere:  0  // C2 range
-  }[instrumentProfile] || 12;
-
-  return baseFreq * Math.pow(2, (semitones + octave * 12 + instrumentOffset) / 12);
-}
-
-// Chromatic for Navigator — every hue degree = a distinct semitone
-function hueToChromaticFreq(hue) {
-  const baseFreq = 65.41;
-  const semitone = Math.floor((hue / 360) * 12);
-  const octave   = Math.floor(currentLight * 2);
-  const instrumentOffset = {
-    grid:       24,
-    weaver:     12,
-    atmosphere:  0
-  }[instrumentProfile] || 12;
-  return baseFreq * Math.pow(2,
-    (semitone + octave * 12 + instrumentOffset) / 12
-  );
-}
-
-// ==========================================
-// 8. FADE OUT WHEN CURSOR IS IDLE
-// ==========================================
-let idleTimer = null;
-
-document.addEventListener('mousemove', () => {
-  clearTimeout(idleTimer);
-  // If cursor stops moving, fade voice out after 2 seconds
-  idleTimer = setTimeout(() => {
-    if (isAudioReady) {
-      voiceGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.3);
-    }
-  }, 2000);
+chrome.storage.local.get(['roomToken', 'instruments'], (data) => {
+  if (data.roomToken)    roomToken = data.roomToken;
+  if (data.instruments)  myInstruments = new Set(data.instruments);
 });
 
 // ==========================================
-// 9. INIT ON FIRST CLICK
+// 4. AUDIO ENGINE — IKEDA SYNTHESIS
 // ==========================================
-document.addEventListener('click', () => {
-  if (!isAudioReady) {
-    setupAudio();
+const TONAL_FREQS = [
+  246.3, 293.4, 196.5, 368.8, 168.2, 144.0,
+  293.4, 246.3, 196.5, 368.8, 144.0, 293.4,
+  246.3, 196.5, 368.8, 168.2
+];
+const AIR_CLUSTER = [11541.8, 12042.5, 14014.1, 14343.8];
+
+const PATTERNS = {
+  sparse: {
+    sub:[1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
+    ton:[1,0,0,0,0,1,0,0,0,0,0,1,0,0,1,0],
+    air:[0,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0],
+    noi:[0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0],
+  },
+  dataflex: {
+    sub:[1,0,0,0,1,0,0,0,1,0,0,0,1,0,1,0],
+    ton:[1,0,1,0,0,1,0,1,1,0,0,1,0,1,0,0],
+    air:[0,1,0,0,1,0,0,1,0,0,1,0,0,1,0,1],
+    noi:[0,0,0,1,0,0,1,0,0,1,0,0,1,0,0,0],
+  },
+  dense: {
+    sub:[1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0],
+    ton:[1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1],
+    air:[1,0,1,0,0,1,1,0,1,0,0,1,1,0,1,0],
+    noi:[0,1,0,0,1,0,0,1,0,1,0,0,1,0,1,0],
+  },
+};
+
+const STEPS = 16;
+let patterns = JSON.parse(JSON.stringify(PATTERNS.sparse));
+
+let actx = null, master = null, comp = null;
+let isAudioReady = false;
+
+function initAudio() {
+  actx     = new (window.AudioContext || window.webkitAudioContext)();
+  comp     = actx.createDynamicsCompressor();
+  comp.threshold.value = -10; comp.ratio.value = 5;
+  comp.attack.value = 0.002;  comp.release.value = 0.1;
+  master   = actx.createGain(); master.gain.value = 0.65;
+  master.connect(comp);
+  comp.connect(actx.destination);
+  isAudioReady = true;
+  console.log("Glitch Orchestra: Ikeda audio engine online");
+}
+
+// ── SUB — pitch-drop sine kick ──
+function triggerSub(t, pan, amp) {
+  const osc = actx.createOscillator();
+  const env = actx.createGain();
+  const pnr = actx.createStereoPanner();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(40 * 2.8, t);
+  osc.frequency.exponentialRampToValueAtTime(40, t + 0.22 * 0.45);
+  env.gain.setValueAtTime(0, t);
+  env.gain.linearRampToValueAtTime(amp, t + 0.002);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+  pnr.pan.value = pan;
+  osc.connect(env); env.connect(pnr); pnr.connect(master);
+  osc.start(t); osc.stop(t + 0.25);
+}
+
+// ── TONAL — paired sines, hue transposes ──
+function triggerTonal(t, stepIdx, pan, amp, scale) {
+  const base = TONAL_FREQS[stepIdx % TONAL_FREQS.length];
+  const f    = base * scale;
+  const f5   = f * 1.4983;
+  [f, f5].forEach((freq, i) => {
+    const osc = actx.createOscillator();
+    const env = actx.createGain();
+    const pnr = actx.createStereoPanner();
+    osc.type = 'sine'; osc.frequency.value = freq;
+    const a = amp * (i === 0 ? 1 : 0.38);
+    env.gain.setValueAtTime(0, t);
+    env.gain.linearRampToValueAtTime(a, t + 0.0015);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+    pnr.pan.value = pan;
+    osc.connect(env); env.connect(pnr); pnr.connect(master);
+    osc.start(t); osc.stop(t + 0.11);
+  });
+}
+
+// ── AIR — ultra-high sine pairs ──
+function triggerAir(t, pan, amp) {
+  const pick = Math.floor(Math.random() * AIR_CLUSTER.length);
+  const f    = AIR_CLUSTER[pick];
+  const osc = actx.createOscillator();
+  const env = actx.createGain();
+  const pnr = actx.createStereoPanner();
+  osc.type = 'sine'; osc.frequency.value = f;
+  env.gain.setValueAtTime(0, t);
+  env.gain.linearRampToValueAtTime(amp, t + 0.0008);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + 0.012);
+  pnr.pan.value = pan;
+  osc.connect(env); env.connect(pnr); pnr.connect(master);
+  osc.start(t); osc.stop(t + 0.02);
+
+  // Paired hit 28ms later
+  if (Math.random() < 0.5) {
+    const f2 = AIR_CLUSTER[(pick+1) % AIR_CLUSTER.length];
+    const t2 = t + 0.028 + Math.random() * 0.02;
+    const o2 = actx.createOscillator();
+    const e2 = actx.createGain();
+    const p2 = actx.createStereoPanner();
+    o2.type = 'sine'; o2.frequency.value = f2;
+    e2.gain.setValueAtTime(0, t2);
+    e2.gain.linearRampToValueAtTime(amp * 0.55, t2 + 0.001);
+    e2.gain.exponentialRampToValueAtTime(0.0001, t2 + 0.012 * 0.7);
+    p2.pan.value = Math.max(-1, Math.min(1, pan + (Math.random()-0.5)*0.3));
+    o2.connect(e2); e2.connect(p2); p2.connect(master);
+    o2.start(t2); o2.stop(t2 + 0.02);
   }
-}, { once: true });
+}
+
+// ── NOISE — bandpass static ──
+function triggerNoise(t, pan, density, amp) {
+  if (Math.random() > density) return;
+  const bands = [[247,300],[369,250],[547,200],[196,180]];
+  const [cF, bw] = bands[Math.floor(Math.random()*bands.length)];
+  const dur    = 0.015 + Math.random() * 0.03;
+  const bufLen = Math.ceil(actx.sampleRate * (dur + 0.01));
+  const buf    = actx.createBuffer(1, bufLen, actx.sampleRate);
+  const d      = buf.getChannelData(0);
+  for (let i = 0; i < bufLen; i++) d[i] = Math.random() * 2 - 1;
+  const src = actx.createBufferSource(); src.buffer = buf;
+  const bp  = actx.createBiquadFilter();
+  bp.type = 'bandpass'; bp.frequency.value = cF; bp.Q.value = cF/bw;
+  const env = actx.createGain();
+  const pnr = actx.createStereoPanner();
+  env.gain.setValueAtTime(amp, t);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  pnr.pan.value = pan;
+  src.connect(bp); bp.connect(env); env.connect(pnr); pnr.connect(master);
+  src.start(t); src.stop(t + dur + 0.01);
+}
 
 // ==========================================
-// 10. KEYBOARD CONTROLS
+// 5. COLOR → AUDIO PARAMETER MAPPING
+// Looks at all 3 cursors in the room and computes parameters.
+// Same function on every laptop so all laptops compute the same params.
+// ==========================================
+function getCursorByRole(role) {
+  // Find the cursor of the performer holding `role`
+  return allCursorStates.find(s =>
+    s.instruments && s.instruments.includes(role)
+  );
+}
+
+function computeParams() {
+  // Defaults if no one holds a role yet
+  const defaults = {
+    bpm: 120, subAmp: 0.6, panSub: 0,
+    tonScale: 1.0, tonAmp: 0.42, tonDensity: 0, panTon: 0, airAmp: 0,
+    noiseDensity: 0, noiseAmp: 0.16, textureDensity: 0, panNoise: 0
+  };
+  const P = { ...defaults };
+
+  // Tempo holder drives BPM and sub
+  const tempoCur = getCursorByRole('tempo');
+  if (tempoCur && tempoCur.cursor) {
+    const c = tempoCur.cursor;
+    const warmth = Math.cos((c.hue * Math.PI) / 180);
+    P.bpm    = 100 + (warmth * 0.5 + 0.5) * 40; // 100-140 BPM
+    P.subAmp = 0.4 + c.sat * 0.6;
+    P.panSub = (c.x - 0.5) * 2;
+  }
+
+  // Tonal holders — find first one to drive tonal params
+  // (if multiple, they all play in sync but each pans to their own X)
+  const tonalCur = getCursorByRole('tonal');
+  if (tonalCur && tonalCur.cursor) {
+    const c = tonalCur.cursor;
+    const transposeOptions = [0.5, 0.667, 0.75, 1.0, 1.25, 1.5, 2.0];
+    P.tonScale   = transposeOptions[Math.floor((c.hue / 360) * transposeOptions.length) % transposeOptions.length];
+    P.tonScale  *= (0.8 + c.light * 0.6);
+    P.airAmp     = c.light * 0.5;
+    P.tonDensity = c.sat;
+    P.panTon     = (c.x - 0.5) * 2;
+  }
+
+  // Noise holder
+  const noiseCur = getCursorByRole('noise');
+  if (noiseCur && noiseCur.cursor) {
+    const c = noiseCur.cursor;
+    P.noiseDensity   = c.variance;
+    P.noiseAmp       = 0.08 + c.sat * 0.25;
+    P.textureDensity = c.sat;
+    P.panNoise       = (c.x - 0.5) * 2;
+  }
+
+  return P;
+}
+
+// ==========================================
+// 6. SCHEDULER — locked to BPM grid
+// ==========================================
+let playing  = false;
+let step     = 0;
+let nextTime = 0;
+let schedId  = null;
+const LOOK   = 0.07;
+
+function stepDur(bpm) { return 60 / bpm / 4; }
+
+function schedStep(s, t) {
+  const P = computeParams();
+
+  // Each layer triggers ONLY if I'm assigned to that role
+  // Each performer who has the role runs the same scheduler logic on their laptop
+
+  // ── SUB (tempo holder only) ──
+  if (myInstruments.has('tempo')) {
+    if (patterns.sub[s]) triggerSub(t, P.panSub, P.subAmp);
+    if (!patterns.sub[s] && Math.random() < P.textureDensity * 0.25) {
+      triggerSub(t, P.panSub, P.subAmp);
+    }
+  }
+
+  // ── TONAL + AIR (tonal holders) ──
+  if (myInstruments.has('tonal')) {
+    // Pan to MY OWN cursor X, not the tonal-holder's
+    // (allows multiple tonal players to spatially split)
+    const myX = (myCursor.x - 0.5) * 2;
+    if (patterns.ton[s]) triggerTonal(t, s, myX, 0.42, P.tonScale);
+    if (patterns.air[s] && P.airAmp > 0.01) triggerAir(t, myX, P.airAmp);
+    if (!patterns.ton[s] && Math.random() < P.tonDensity * 0.6) {
+      triggerTonal(t, s, myX, 0.42, P.tonScale);
+    }
+    if (!patterns.air[s] && Math.random() < P.textureDensity * 0.5 && P.airAmp > 0.01) {
+      triggerAir(t, myX, P.airAmp);
+    }
+  }
+
+  // ── AIR (separate role — for performers playing air without tonal) ──
+  // (Wait — your spec said "tonal + air" together. So we keep them paired.
+  //  If you want air separable later, it's a one-line change here.)
+
+  // ── NOISE (noise holders) ──
+  if (myInstruments.has('noise')) {
+    const myX = (myCursor.x - 0.5) * 2;
+    triggerNoise(t, myX, P.noiseDensity, P.noiseAmp);
+  }
+
+  // If I'm the tempo holder, report current BPM up to the server
+  if (myInstruments.has('tempo')) {
+    chrome.runtime.sendMessage({
+      type: "SEND_TEMPO",
+      bpm: P.bpm
+    }).catch(() => {});
+  }
+}
+
+function scheduler() {
+  if (!playing || !actx) return;
+  const P = computeParams();
+  while (nextTime < actx.currentTime + LOOK) {
+    schedStep(step, nextTime);
+    step = (step + 1) % STEPS;
+    nextTime += stepDur(P.bpm);
+  }
+  schedId = setTimeout(scheduler, 20);
+}
+
+function startPlay() {
+  if (!isAudioReady) initAudio();
+  playing  = true;
+  step     = 0;
+  nextTime = actx.currentTime + 0.05;
+  scheduler();
+}
+
+// ==========================================
+// 7. CLOCK SYNC — BAR_TICK from server
+// ==========================================
+let lastBarTick = null;
+
+function handleBarTick(bar, bpm, serverTime, receivedAt) {
+  if (!playing || !actx) return;
+
+  // Where SHOULD we be right now according to the server?
+  // The server sends BAR_TICK every 2 seconds, which represents the start of a new bar
+  // (16 steps). Each laptop should be at step 0 of a fresh bar at this moment.
+
+  // Estimate one-way network latency (very rough)
+  const latency = (Date.now() - receivedAt) / 1000;
+
+  // Calculate expected step position
+  // We don't actually know how many steps in we should be, but on every BAR_TICK
+  // we should be at step 0 (within a few ms tolerance).
+  const expectedStep = 0;
+  const stepDiff     = step - expectedStep;
+
+  // If we're more than 2 steps off, snap
+  // Otherwise, gently nudge by adjusting nextTime
+  if (Math.abs(stepDiff) > 2 || step > 13) {
+    // Hard resync — we've drifted too far
+    step     = 0;
+    nextTime = actx.currentTime + 0.05;
+    console.log(`Clock resync: hard snap to step 0`);
+  } else if (stepDiff !== 0) {
+    // Soft nudge — adjust nextTime to absorb drift over next steps
+    const nudgeAmount = stepDiff * stepDur(bpm) * 0.3;
+    nextTime -= nudgeAmount;
+  }
+
+  lastBarTick = { bar, bpm, time: actx.currentTime };
+}
+
+// ==========================================
+// 8. NETWORK MESSAGE HANDLER
+// ==========================================
+chrome.runtime.onMessage.addListener((message) => {
+  switch (message.type) {
+
+    case 'NETWORK_ROLE_STATE':
+      // Server told us who has what — but our own instruments are
+      // confirmed via INSTRUMENTS_CONFIRMED, not here
+      break;
+
+    case 'NETWORK_INSTRUMENTS_CONFIRMED':
+      myInstruments = new Set(message.instruments || []);
+      console.log(`My instruments: ${Array.from(myInstruments).join(', ')}`);
+      // Auto-start audio if we have any instruments
+      if (myInstruments.size > 0 && !playing && isAudioReady) {
+        startPlay();
+      }
+      break;
+
+    case 'NETWORK_CURSOR_STATES':
+      allCursorStates = message.states || [];
+      break;
+
+    case 'NETWORK_BAR_TICK':
+      handleBarTick(message.bar, message.bpm, message.serverTime, message.receivedAt);
+      break;
+  }
+});
+
+// ==========================================
+// 9. KEYBOARD CONTROLS (radius/feather)
 // ==========================================
 document.addEventListener('keydown', (e) => {
   const tag = document.activeElement
     ? document.activeElement.tagName.toLowerCase() : '';
-  if (
-    tag === 'input' ||
-    tag === 'textarea' ||
-    document.activeElement.isContentEditable
-  ) return;
+  if (tag === 'input' || tag === 'textarea' ||
+      document.activeElement.isContentEditable) return;
 
   let changed = false;
   if (e.key === ']') { currentRadius  = Math.min(300, currentRadius + 5);  changed = true; }
@@ -598,6 +523,18 @@ document.addEventListener('keydown', (e) => {
   }
   if (changed) updateCursorVisuals();
 });
+
+// ==========================================
+// 10. AUDIO UNLOCK ON FIRST CLICK
+// ==========================================
+document.addEventListener('click', () => {
+  if (!isAudioReady) {
+    initAudio();
+    if (myInstruments.size > 0) startPlay();
+  } else if (!playing && myInstruments.size > 0) {
+    startPlay();
+  }
+}, { once: true });
 
 // ==========================================
 // 11. INIT

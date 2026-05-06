@@ -1,17 +1,17 @@
 {
   "manifest_version": 3,
-  "name": "Glitch Explorer",
-  "version": "1.0",
-  "description": "Networked Sonic Performance Tool",
+  "name": "Glitch Orchestra",
+  "version": "2.0",
+  "description": "Networked Ikeda-style sonic performance tool",
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Open Glitch Explorer"
+    "default_title": "Open Glitch Orchestra"
   },
   "permissions": [
     "activeTab",
     "scripting",
     "tabs",
-    "storage" 
+    "storage"
   ],
   "host_permissions": [
     "<all_urls>"
