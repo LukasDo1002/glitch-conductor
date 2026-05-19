@@ -1,13 +1,13 @@
 // ============================================================
 // STATE
 // ============================================================
-let myId           = null;
-let myInstruments  = new Set();
+let myId            = null;
+let myInstruments   = new Set();
 let roleAssignments = {};
-let tempoOwner     = null;
-let connected      = false;
+let tempoOwner      = null;
+let connected       = false;
 
-const ALL_INSTRUMENTS = ['tempo', 'tonal', 'air', 'noise'];
+const ALL_INSTRUMENTS = ['tempo', 'tonal', 'air', 'noise', 'rustle', 'rumble'];
 const EXCLUSIVE       = new Set(['tempo']);
 
 // ============================================================
@@ -22,24 +22,17 @@ const myIdEl      = document.getElementById('myId');
 // ============================================================
 // LOAD SAVED SETTINGS
 // ============================================================
-chrome.storage.local.get(
-  ['roomToken', 'instruments'],
-  (data) => {
-    if (data.roomToken) {
-      roomInput.value = data.roomToken;
-    }
-    if (data.instruments && Array.isArray(data.instruments)) {
-      myInstruments = new Set(data.instruments);
-      updateInstrumentUI();
-    }
+chrome.storage.local.get(['roomToken', 'instruments'], (data) => {
+  if (data.roomToken) roomInput.value = data.roomToken;
+  if (data.instruments && Array.isArray(data.instruments)) {
+    myInstruments = new Set(data.instruments);
+    updateInstrumentUI();
   }
-);
+});
 
 // ============================================================
-// REQUEST CONNECTION STATE FROM BACKGROUND
+// CONNECTION STATE POLLING
 // ============================================================
-// The background script holds the WebSocket. We ask it for the
-// current connection state and any role assignments it knows about.
 function requestConnectionState() {
   chrome.runtime.sendMessage({ type: 'GET_CONNECTION_STATE' }, (response) => {
     if (chrome.runtime.lastError || !response) return;
@@ -62,11 +55,8 @@ function requestConnectionState() {
   });
 }
 
-// Poll connection state every second so the UI stays fresh while popup is open
 requestConnectionState();
 const pollInterval = setInterval(requestConnectionState, 1000);
-
-// Cleanup on popup close
 window.addEventListener('unload', () => clearInterval(pollInterval));
 
 // ============================================================
@@ -74,13 +64,11 @@ window.addEventListener('unload', () => clearInterval(pollInterval));
 // ============================================================
 ALL_INSTRUMENTS.forEach(inst => {
   const el = document.getElementById('inst-' + inst);
+  if (!el) return;
   el.addEventListener('click', () => {
     if (el.classList.contains('locked')) return;
-    if (myInstruments.has(inst)) {
-      myInstruments.delete(inst);
-    } else {
-      myInstruments.add(inst);
-    }
+    if (myInstruments.has(inst)) myInstruments.delete(inst);
+    else                          myInstruments.add(inst);
     updateInstrumentUI();
   });
 });
@@ -90,31 +78,25 @@ ALL_INSTRUMENTS.forEach(inst => {
 // ============================================================
 function updateInstrumentUI() {
   ALL_INSTRUMENTS.forEach(inst => {
-    const el         = document.getElementById('inst-' + inst);
+    const el = document.getElementById('inst-' + inst);
+    if (!el) return;
     const isSelected = myInstruments.has(inst);
     const owners     = roleAssignments[inst] || [];
 
-    // Reset state classes
     el.classList.remove('selected', 'locked');
-
-    // Selected state
     if (isSelected) el.classList.add('selected');
 
-    // Lock state for exclusive instruments
     if (EXCLUSIVE.has(inst)) {
-      // Locked if someone else has it (and it's not us)
       if (tempoOwner && tempoOwner !== myId) {
         el.classList.add('locked');
         const lockEl = document.getElementById('lock-' + inst);
         if (lockEl) lockEl.textContent = `${tempoOwner.toUpperCase()} has this`;
-        // Ensure we don't claim it
         myInstruments.delete(inst);
       } else {
         const lockEl = document.getElementById('lock-' + inst);
         if (lockEl) lockEl.textContent = '';
       }
     } else {
-      // Shared — show how many others play it
       const others = owners.filter(id => id !== myId).length;
       const shareEl = document.getElementById('share-' + inst);
       if (shareEl) {
@@ -132,14 +114,8 @@ saveBtn.addEventListener('click', () => {
     roomToken:   roomInput.value.trim() || 'default',
     instruments: Array.from(myInstruments)
   };
-
   chrome.storage.local.set(settings, () => {
-    // Tell the background script to push these to the server
-    chrome.runtime.sendMessage({
-      type: 'UPDATE_SETTINGS',
-      settings
-    });
-
+    chrome.runtime.sendMessage({ type: 'UPDATE_SETTINGS', settings });
     statusMsg.style.display = 'block';
     setTimeout(() => { statusMsg.style.display = 'none'; }, 2000);
   });

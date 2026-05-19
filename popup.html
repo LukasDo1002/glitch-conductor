@@ -10,7 +10,6 @@ body {
   padding: 16px;
   margin: 0;
 }
-
 h2 {
   margin: 0 0 16px 0;
   color: #ff3333;
@@ -18,7 +17,6 @@ h2 {
   letter-spacing: 0.15em;
   text-transform: uppercase;
 }
-
 label {
   display: block;
   margin-top: 14px;
@@ -27,7 +25,6 @@ label {
   color: #888;
   text-transform: uppercase;
 }
-
 input[type=text] {
   width: 100%;
   box-sizing: border-box;
@@ -39,13 +36,11 @@ input[type=text] {
   font-family: monospace;
   font-size: 12px;
 }
-
 .section {
   margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid #1a1a1a;
 }
-
 .section-label {
   font-size: 10px;
   letter-spacing: 0.15em;
@@ -53,7 +48,6 @@ input[type=text] {
   text-transform: uppercase;
   margin-bottom: 8px;
 }
-
 .instrument {
   display: flex;
   align-items: center;
@@ -64,62 +58,26 @@ input[type=text] {
   transition: 0.06s;
   user-select: none;
 }
-
-.instrument:hover {
-  border-color: #444;
-}
-
-.instrument.selected {
-  border-color: #fff;
-  background: #1a1a1a;
-}
-
-.instrument.locked {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.instrument.locked:hover {
-  border-color: #1a1a1a;
-}
-
+.instrument:hover { border-color: #444; }
+.instrument.selected { border-color: #fff; background: #1a1a1a; }
+.instrument.locked { opacity: 0.4; cursor: not-allowed; }
+.instrument.locked:hover { border-color: #1a1a1a; }
 .inst-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-right: 10px;
-  flex-shrink: 0;
+  width: 8px; height: 8px; border-radius: 50%;
+  margin-right: 10px; flex-shrink: 0;
 }
-
-.inst-dot.tempo { background: #88ffcc; }
-.inst-dot.tonal { background: #ffaa88; }
-.inst-dot.air   { background: #aabbff; }
-.inst-dot.noise { background: #ffff88; }
-
+.inst-dot.tempo  { background: #88ffcc; }
+.inst-dot.tonal  { background: #ffaa88; }
+.inst-dot.air    { background: #aabbff; }
+.inst-dot.noise  { background: #ffff88; }
+.inst-dot.rustle { background: #ff99dd; }
+.inst-dot.rumble { background: #cc8866; }
 .inst-name {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  flex: 1;
+  font-size: 11px; letter-spacing: 0.08em; flex: 1;
 }
-
-.inst-role {
-  font-size: 9px;
-  color: #666;
-  letter-spacing: 0.05em;
-}
-
-.inst-locked-by {
-  font-size: 9px;
-  color: #ff6666;
-  margin-left: 6px;
-}
-
-.inst-shared {
-  font-size: 9px;
-  color: #66cc88;
-  margin-left: 6px;
-}
-
+.inst-role { font-size: 9px; color: #666; letter-spacing: 0.05em; }
+.inst-locked-by { font-size: 9px; color: #ff6666; margin-left: 6px; }
+.inst-shared { font-size: 9px; color: #66cc88; margin-left: 6px; }
 button {
   width: 100%;
   margin-top: 18px;
@@ -133,37 +91,20 @@ button {
   font-size: 11px;
   font-family: monospace;
 }
-
-button:hover {
-  background-color: #ff6666;
-}
-
+button:hover { background-color: #ff6666; }
 #status {
-  margin-top: 10px;
-  font-size: 10px;
-  color: #66cc88;
-  text-align: center;
-  display: none;
-  letter-spacing: 0.1em;
+  margin-top: 10px; font-size: 10px; color: #66cc88;
+  text-align: center; display: none; letter-spacing: 0.1em;
 }
-
 #connection {
-  font-size: 9px;
-  color: #444;
-  text-align: center;
-  margin-top: 8px;
-  letter-spacing: 0.1em;
+  font-size: 9px; color: #444; text-align: center;
+  margin-top: 8px; letter-spacing: 0.1em;
 }
-
 #connection.connected { color: #66cc88; }
 #connection.disconnected { color: #ff6666; }
-
 #myId {
-  font-size: 9px;
-  color: #555;
-  margin-top: 4px;
-  text-align: center;
-  letter-spacing: 0.08em;
+  font-size: 9px; color: #555; margin-top: 4px;
+  text-align: center; letter-spacing: 0.08em;
 }
 </style>
 </head>
@@ -186,7 +127,7 @@ button:hover {
 
   <div class="instrument" id="inst-tonal" data-inst="tonal">
     <div class="inst-dot tonal"></div>
-    <div class="inst-name">Tonal + Air</div>
+    <div class="inst-name">Tonal</div>
     <div class="inst-role">shared</div>
     <div class="inst-shared" id="share-tonal"></div>
   </div>
@@ -203,6 +144,20 @@ button:hover {
     <div class="inst-name">Noise + Texture</div>
     <div class="inst-role">shared</div>
     <div class="inst-shared" id="share-noise"></div>
+  </div>
+
+  <div class="instrument" id="inst-rustle" data-inst="rustle">
+    <div class="inst-dot rustle"></div>
+    <div class="inst-name">Rustle (high shimmer)</div>
+    <div class="inst-role">shared</div>
+    <div class="inst-shared" id="share-rustle"></div>
+  </div>
+
+  <div class="instrument" id="inst-rumble" data-inst="rumble">
+    <div class="inst-dot rumble"></div>
+    <div class="inst-name">Rumble (low floor)</div>
+    <div class="inst-role">shared</div>
+    <div class="inst-shared" id="share-rumble"></div>
   </div>
 </div>
 

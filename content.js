@@ -1,4 +1,66 @@
 // ==========================================
+// ★ TUNING — adjust everything here ★
+// ==========================================
+const TUNING = {
+
+  // ---- DYNAMISM CURVE ----
+  // Each player's own cursor brightness (light 0-1) drives an "intensity"
+  // value. A higher exponent makes dark vs bright MORE different (steeper arc).
+  // 1.0 = linear (boring), 2.5 = strong arc, 4.0 = extreme.
+  dynamicsExponent: 2.6,
+  // Floor so dark areas aren't fully silent (0 = total silence possible)
+  dynamicsFloor: 0.06,
+
+  // ---- TEMPO ----
+  bpmMin: 100,
+  bpmMax: 140,
+
+  // ---- SUB (tempo holder) ----
+  subAmpMin: 0.35,
+  subAmpMax: 1.0,
+  subFreq:   40,
+  subDecay:  0.22,
+
+  // ---- TONAL ----
+  tonAmp:        0.42,
+  tonDecay:      0.09,
+  tonDensityMul: 0.6,
+
+  // ---- AIR ----
+  airAmpMin:     0.08,
+  airAmpMax:     0.28,
+  airDensityMin: 0.30,
+  airDensityMax: 1.00,
+  airFillMul:    0.45,
+
+  // ---- NOISE (Lukas's louder values) ----
+  noiseAmpBase:  0.85,
+  noiseAmpSat:   0.70,
+  noiseAmpBoost: 5,
+  noiseDurMin:   0.03,
+  noiseDurRand:  0.05,
+
+  // ---- RUSTLE (new) ----
+  rustleAmpMin:     0.04,
+  rustleAmpMax:     0.20,
+  rustleDensityMin: 0.25,
+  rustleDensityMax: 0.95,
+  rustleGrainMin:   3,
+  rustleGrainMax:   7,
+
+  // ---- RUMBLE (new) ----
+  rumbleAmpMin:     0.10,
+  rumbleAmpMax:     0.45,
+  rumbleDensityMin: 0.40,
+  rumbleDensityMax: 1.00,
+  rumbleFreqLow:    24,
+  rumbleFreqHigh:   115,
+
+  // ---- MASTER ----
+  masterVol: 0.65,
+};
+
+// ==========================================
 // 1. VISUAL CURSOR & CAMERA SETUP
 // ==========================================
 let currentRadius  = 80;
@@ -167,8 +229,6 @@ const TONAL_FREQS = [
   246.3, 196.5, 368.8, 168.2
 ];
 
-// Air uses three pools — micro click bursts pick from LOW or MID;
-// beat-pair sines create the detuned shimmer Ikeda uses
 const AIR_LOW = [4218.3, 4891.2, 5432.7, 6103.4];
 const AIR_MID = [7341.1, 7892.4, 8203.6, 9017.8];
 const AIR_BEAT_PAIRS = [
@@ -178,24 +238,35 @@ const AIR_BEAT_PAIRS = [
   [8900.0, 8901.9],
 ];
 
+// RUSTLE clusters — from analysis of data.simplex:
+// tight partials around 4400Hz and 8980Hz that beat to form rustle
+const RUSTLE_CLUSTER_A = [4388.5, 4394.0, 4400.8, 4413.2];
+const RUSTLE_CLUSTER_B = [8959.5, 8966.2, 8973.0, 8979.5, 8986.5, 8993.0, 9020.0];
+
 const PATTERNS = {
   sparse: {
     sub:[1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
     ton:[1,0,0,0,0,1,0,0,0,0,0,1,0,0,1,0],
     air:[0,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0],
     noi:[0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0],
+    rus:[0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0],
+    rum:[1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
   },
   dataflex: {
     sub:[1,0,0,0,1,0,0,0,1,0,0,0,1,0,1,0],
     ton:[1,0,1,0,0,1,0,1,1,0,0,1,0,1,0,0],
     air:[0,1,0,0,1,0,0,1,0,0,1,0,0,1,0,1],
     noi:[0,0,0,1,0,0,1,0,0,1,0,0,1,0,0,0],
+    rus:[1,0,1,1,0,1,0,1,1,1,0,1,0,1,1,0],
+    rum:[1,0,0,0,0,0,0,0,1,0,0,0,0,0,1,0],
   },
   dense: {
     sub:[1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0],
     ton:[1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1],
     air:[1,0,1,0,0,1,1,0,1,0,0,1,1,0,1,0],
     noi:[0,1,0,0,1,0,0,1,0,1,0,0,1,0,1,0],
+    rus:[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    rum:[1,0,0,1,0,0,1,0,1,0,0,1,0,0,1,0],
   },
 };
 
@@ -210,12 +281,21 @@ function initAudio() {
   comp     = actx.createDynamicsCompressor();
   comp.threshold.value = -10; comp.ratio.value = 5;
   comp.attack.value = 0.002;  comp.release.value = 0.1;
-  master   = actx.createGain(); master.gain.value = 0.65;
+  master   = actx.createGain(); master.gain.value = TUNING.masterVol;
   master.connect(comp);
   comp.connect(actx.destination);
   isAudioReady = true;
   console.log("Glitch Orchestra: Ikeda audio engine online");
 }
+
+// ---- DYNAMISM HELPER ----
+// Turn a cursor's brightness (0-1) into an intensity multiplier with a
+// steep curve so dark and bright are dramatically different.
+function dynamics(light) {
+  const curved = Math.pow(light, TUNING.dynamicsExponent);
+  return TUNING.dynamicsFloor + (1 - TUNING.dynamicsFloor) * curved;
+}
+function lerp(a, b, t) { return a + (b - a) * t; }
 
 // ── SUB — pitch-drop sine kick ──
 function triggerSub(t, pan, amp) {
@@ -223,14 +303,14 @@ function triggerSub(t, pan, amp) {
   const env = actx.createGain();
   const pnr = actx.createStereoPanner();
   osc.type = 'sine';
-  osc.frequency.setValueAtTime(40 * 2.8, t);
-  osc.frequency.exponentialRampToValueAtTime(40, t + 0.22 * 0.45);
+  osc.frequency.setValueAtTime(TUNING.subFreq * 2.8, t);
+  osc.frequency.exponentialRampToValueAtTime(TUNING.subFreq, t + TUNING.subDecay * 0.45);
   env.gain.setValueAtTime(0, t);
   env.gain.linearRampToValueAtTime(amp, t + 0.002);
-  env.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + TUNING.subDecay);
   pnr.pan.value = pan;
   osc.connect(env); env.connect(pnr); pnr.connect(master);
-  osc.start(t); osc.stop(t + 0.25);
+  osc.start(t); osc.stop(t + TUNING.subDecay + 0.03);
 }
 
 // ── TONAL — paired sines, hue transposes ──
@@ -246,19 +326,15 @@ function triggerTonal(t, stepIdx, pan, amp, scale) {
     const a = amp * (i === 0 ? 1 : 0.38);
     env.gain.setValueAtTime(0, t);
     env.gain.linearRampToValueAtTime(a, t + 0.0015);
-    env.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + TUNING.tonDecay);
     pnr.pan.value = pan;
     osc.connect(env); env.connect(pnr); pnr.connect(master);
-    osc.start(t); osc.stop(t + 0.11);
+    osc.start(t); osc.stop(t + TUNING.tonDecay + 0.02);
   });
 }
 
 // ── AIR — three-layer Ikeda breath ──
-// Layer A: micro click bursts (3-4 sine pings at 4-9kHz, 2-18ms apart)
-// Layer B: bandpass noise breath (texture layer, 65% chance)
-// Layer C: detuned beating pairs (1.9-4.1Hz throb, 60% chance)
 function triggerAir(t, pan, amp) {
-  // Layer A
   const burstCount = 3 + (Math.random() < 0.4 ? 1 : 0);
   let offsetMs = 0;
   for (let i = 0; i < burstCount; i++) {
@@ -280,7 +356,6 @@ function triggerAir(t, pan, amp) {
     offsetMs += 2 + Math.random() * 16;
   }
 
-  // Layer B
   if (Math.random() < 0.65) {
     const pool       = Math.random() < 0.5 ? AIR_LOW : AIR_MID;
     const centerFreq = pool[Math.floor(Math.random() * pool.length)];
@@ -301,7 +376,6 @@ function triggerAir(t, pan, amp) {
     src.start(t); src.stop(t + noiseDur + 0.01);
   }
 
-  // Layer C
   if (Math.random() < 0.6) {
     const pair    = AIR_BEAT_PAIRS[Math.floor(Math.random() * AIR_BEAT_PAIRS.length)];
     const beatDur = 0.04 + Math.random() * 0.04;
@@ -320,12 +394,12 @@ function triggerAir(t, pan, amp) {
   }
 }
 
-// ── NOISE — bandpass static (longer duration, much louder per Lukas's changes) ──
+// ── NOISE — bandpass static (Lukas's louder/longer values) ──
 function triggerNoise(t, pan, density, amp) {
   if (Math.random() > density) return;
   const bands = [[247,300],[369,250],[547,200],[196,180]];
   const [cF, bw] = bands[Math.floor(Math.random()*bands.length)];
-  const dur    = 0.03 + Math.random() * 0.05; // Lukas: longer noise bursts
+  const dur    = TUNING.noiseDurMin + Math.random() * TUNING.noiseDurRand;
   const bufLen = Math.ceil(actx.sampleRate * (dur + 0.01));
   const buf    = actx.createBuffer(1, bufLen, actx.sampleRate);
   const d      = buf.getChannelData(0);
@@ -335,15 +409,69 @@ function triggerNoise(t, pan, density, amp) {
   bp.type = 'bandpass'; bp.frequency.value = cF; bp.Q.value = cF/bw;
   const env = actx.createGain();
   const pnr = actx.createStereoPanner();
-  env.gain.setValueAtTime(amp * 5, t); // Lukas: 5x amp boost for presence
+  env.gain.setValueAtTime(amp * TUNING.noiseAmpBoost, t);
   env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   pnr.pan.value = pan;
   src.connect(bp); bp.connect(env); env.connect(pnr); pnr.connect(master);
   src.start(t); src.stop(t + dur + 0.01);
 }
 
+// ── RUSTLE — semi-continuous high shimmer (new) ──
+// A cloud of very short sine grains drawn from two tight clusters.
+// Closely-spaced frequencies beat against each other = rustle.
+function triggerRustle(t, pan, amp, grains) {
+  let offset = 0;
+  for (let i = 0; i < grains; i++) {
+    const cluster = Math.random() < 0.5 ? RUSTLE_CLUSTER_A : RUSTLE_CLUSTER_B;
+    const f       = cluster[Math.floor(Math.random() * cluster.length)];
+    const tb      = t + offset;
+    const dur     = 0.004 + Math.random() * 0.010;
+    const a       = amp * (0.5 + Math.random() * 0.6);
+    const osc = actx.createOscillator();
+    const env = actx.createGain();
+    const pnr = actx.createStereoPanner();
+    osc.type = 'sine'; osc.frequency.value = f;
+    env.gain.setValueAtTime(0, tb);
+    env.gain.linearRampToValueAtTime(a, tb + 0.0008);
+    env.gain.exponentialRampToValueAtTime(0.0001, tb + dur);
+    pnr.pan.value = Math.max(-1, Math.min(1, pan + (Math.random() - 0.5) * 0.5));
+    osc.connect(env); env.connect(pnr); pnr.connect(master);
+    osc.start(tb); osc.stop(tb + dur + 0.003);
+    offset += 0.003 + Math.random() * 0.012;
+  }
+}
+
+// ── RUMBLE — low continuous filtered floor (new) ──
+// Brown noise through a low lowpass, slow swell. Brightness drives
+// loudness and cutoff; long overlapping events = continuous floor.
+function triggerRumble(t, pan, amp, freqHz) {
+  const dur    = 0.4 + Math.random() * 0.5;
+  const bufLen = Math.ceil(actx.sampleRate * (dur + 0.05));
+  const buf    = actx.createBuffer(1, bufLen, actx.sampleRate);
+  const d      = buf.getChannelData(0);
+  let last = 0;
+  for (let i = 0; i < bufLen; i++) {
+    const white = Math.random() * 2 - 1;
+    last = (last + 0.02 * white) / 1.02;
+    d[i] = last * 3.5;
+  }
+  const src = actx.createBufferSource(); src.buffer = buf;
+  const lp  = actx.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = freqHz; lp.Q.value = 0.7;
+  const env = actx.createGain();
+  const pnr = actx.createStereoPanner();
+  env.gain.setValueAtTime(0, t);
+  env.gain.linearRampToValueAtTime(amp, t + dur * 0.4);
+  env.gain.linearRampToValueAtTime(0.0001, t + dur);
+  pnr.pan.value = pan;
+  src.connect(lp); lp.connect(env); env.connect(pnr); pnr.connect(master);
+  src.start(t); src.stop(t + dur + 0.05);
+}
+
 // ==========================================
 // 5. COLOR → AUDIO PARAMETER MAPPING
+// Each role uses its OWN player's cursor, run through the dynamics
+// curve so brightness creates a steep per-player arc.
 // ==========================================
 function getCursorByRole(role) {
   return allCursorStates.find(s =>
@@ -352,57 +480,82 @@ function getCursorByRole(role) {
 }
 
 function computeParams() {
-  const defaults = {
+  const P = {
     bpm: 120, subAmp: 0.6, panSub: 0,
-    tonScale: 1.0, tonAmp: 0.42, tonDensity: 0, panTon: 0,
-    airAmp: 0.11, airDensity: 0.5, panAir: 0,
-    noiseDensity: 0, noiseAmp: 0.16, textureDensity: 0, panNoise: 0
+    tonScale: 1.0, tonAmp: TUNING.tonAmp, tonDensity: 0, panTon: 0,
+    airAmp: TUNING.airAmpMin, airDensity: TUNING.airDensityMin, panAir: 0,
+    noiseDensity: 0, noiseAmp: TUNING.noiseAmpBase, textureDensity: 0, panNoise: 0,
+    rustleAmp: TUNING.rustleAmpMin, rustleDensity: TUNING.rustleDensityMin,
+    rustleGrains: TUNING.rustleGrainMin, panRustle: 0,
+    rumbleAmp: TUNING.rumbleAmpMin, rumbleDensity: TUNING.rumbleDensityMin,
+    rumbleFreq: TUNING.rumbleFreqLow, panRumble: 0,
   };
-  const P = { ...defaults };
 
-  // Tempo holder drives BPM and sub
+  // TEMPO + SUB
   const tempoCur = getCursorByRole('tempo');
   if (tempoCur && tempoCur.cursor) {
-    const c = tempoCur.cursor;
+    const c   = tempoCur.cursor;
+    const dyn = dynamics(c.light);
     const warmth = Math.cos((c.hue * Math.PI) / 180);
-    P.bpm    = 100 + (warmth * 0.5 + 0.5) * 40;
-    P.subAmp = 0.4 + c.sat * 0.6;
+    P.bpm    = TUNING.bpmMin + (warmth * 0.5 + 0.5) * (TUNING.bpmMax - TUNING.bpmMin);
+    P.subAmp = lerp(TUNING.subAmpMin, TUNING.subAmpMax, dyn) * (0.6 + c.sat * 0.4);
     P.panSub = (c.x - 0.5) * 2;
   }
 
-  // Tonal holder
+  // TONAL
   const tonalCur = getCursorByRole('tonal');
   if (tonalCur && tonalCur.cursor) {
-    const c = tonalCur.cursor;
+    const c   = tonalCur.cursor;
+    const dyn = dynamics(c.light);
     const transposeOptions = [0.5, 0.667, 0.75, 1.0, 1.25, 1.5, 2.0];
     P.tonScale   = transposeOptions[Math.floor((c.hue / 360) * transposeOptions.length) % transposeOptions.length];
     P.tonScale  *= (0.8 + c.light * 0.6);
-    P.tonDensity = c.sat;
+    P.tonAmp     = TUNING.tonAmp * dyn;
+    P.tonDensity = c.sat * dyn;
     P.panTon     = (c.x - 0.5) * 2;
   }
 
-  // Air holder — independent role
-  // hue   → airAmp (warm = stronger, cool = softer)
-  // sat   → airDensity (saturation = how often it fires)
-  // light → small boost to airAmp
-  // x     → pan
+  // AIR
   const airCur = getCursorByRole('air');
   if (airCur && airCur.cursor) {
-    const c       = airCur.cursor;
-    const warmth  = Math.cos((c.hue * Math.PI) / 180);
-    P.airAmp     = 0.08 + (warmth * 0.5 + 0.5) * 0.14 + c.light * 0.06;
-    P.airDensity = 0.3 + c.sat * 0.7;
+    const c   = airCur.cursor;
+    const dyn = dynamics(c.light);
+    P.airAmp     = lerp(TUNING.airAmpMin, TUNING.airAmpMax, dyn);
+    P.airDensity = lerp(TUNING.airDensityMin, TUNING.airDensityMax, c.sat * dyn);
     P.panAir     = (c.x - 0.5) * 2;
   }
 
-  // Noise holder — Lukas's louder values
+  // NOISE
   const noiseCur = getCursorByRole('noise');
   if (noiseCur && noiseCur.cursor) {
-    const c = noiseCur.cursor;
-    P.noiseDensity   = c.variance;
-    P.noiseAmp       = 0.85 + c.sat * 0.70; // Lukas: much higher base
-    P.textureDensity = c.sat;
+    const c   = noiseCur.cursor;
+    const dyn = dynamics(c.light);
+    P.noiseDensity   = c.variance * dyn;
+    P.noiseAmp       = (TUNING.noiseAmpBase + c.sat * TUNING.noiseAmpSat) * dyn;
+    P.textureDensity = c.sat * dyn;
     P.panNoise       = (c.x - 0.5) * 2;
+  }
+
+  // RUSTLE
+  const rustleCur = getCursorByRole('rustle');
+  if (rustleCur && rustleCur.cursor) {
+    const c   = rustleCur.cursor;
+    const dyn = dynamics(c.light);
+    P.rustleAmp     = lerp(TUNING.rustleAmpMin, TUNING.rustleAmpMax, dyn);
+    P.rustleDensity = lerp(TUNING.rustleDensityMin, TUNING.rustleDensityMax, c.sat * dyn);
+    P.rustleGrains  = Math.round(lerp(TUNING.rustleGrainMin, TUNING.rustleGrainMax, dyn));
+    P.panRustle     = (c.x - 0.5) * 2;
+  }
+
+  // RUMBLE
+  const rumbleCur = getCursorByRole('rumble');
+  if (rumbleCur && rumbleCur.cursor) {
+    const c   = rumbleCur.cursor;
+    const dyn = dynamics(c.light);
+    P.rumbleAmp     = lerp(TUNING.rumbleAmpMin, TUNING.rumbleAmpMax, dyn);
+    P.rumbleDensity = lerp(TUNING.rumbleDensityMin, TUNING.rumbleDensityMax, c.sat);
+    P.rumbleFreq    = lerp(TUNING.rumbleFreqLow, TUNING.rumbleFreqHigh, c.light);
+    P.panRumble     = (c.x - 0.5) * 2;
   }
 
   return P;
@@ -422,7 +575,7 @@ function stepDur(bpm) { return 60 / bpm / 4; }
 function schedStep(s, t) {
   const P = computeParams();
 
-  // SUB (tempo holder only)
+  // SUB
   if (myInstruments.has('tempo')) {
     if (patterns.sub[s]) triggerSub(t, P.panSub, P.subAmp);
     if (!patterns.sub[s] && Math.random() < P.textureDensity * 0.25) {
@@ -430,34 +583,48 @@ function schedStep(s, t) {
     }
   }
 
-  // TONAL (tonal holders) — now independent of air
+  // TONAL
   if (myInstruments.has('tonal')) {
     const myX = (myCursor.x - 0.5) * 2;
-    if (patterns.ton[s]) triggerTonal(t, s, myX, 0.42, P.tonScale);
-    if (!patterns.ton[s] && Math.random() < P.tonDensity * 0.6) {
-      triggerTonal(t, s, myX, 0.42, P.tonScale);
+    if (patterns.ton[s]) triggerTonal(t, s, myX, P.tonAmp, P.tonScale);
+    if (!patterns.ton[s] && Math.random() < P.tonDensity * TUNING.tonDensityMul) {
+      triggerTonal(t, s, myX, P.tonAmp, P.tonScale);
     }
   }
 
-  // AIR (air holders) — independent role
+  // AIR
   if (myInstruments.has('air')) {
-    const myX = (myCursor.x - 0.5) * 2;
-    const pan = P.panAir !== undefined ? P.panAir : myX;
-    if (patterns.air[s]) {
-      triggerAir(t, pan, P.airAmp);
-    }
-    if (!patterns.air[s] && Math.random() < P.airDensity * 0.45) {
+    const pan = P.panAir;
+    if (patterns.air[s]) triggerAir(t, pan, P.airAmp);
+    if (!patterns.air[s] && Math.random() < P.airDensity * TUNING.airFillMul) {
       triggerAir(t, pan, P.airAmp * 0.75);
     }
   }
 
-  // NOISE (noise holders)
+  // NOISE
   if (myInstruments.has('noise')) {
     const myX = (myCursor.x - 0.5) * 2;
     triggerNoise(t, myX, P.noiseDensity, P.noiseAmp);
   }
 
-  // Tempo holder reports BPM to server
+  // RUSTLE — pattern + probabilistic for semi-continuous feel
+  if (myInstruments.has('rustle')) {
+    const pan = P.panRustle;
+    if (patterns.rus[s]) triggerRustle(t, pan, P.rustleAmp, P.rustleGrains);
+    if (!patterns.rus[s] && Math.random() < P.rustleDensity) {
+      triggerRustle(t, pan, P.rustleAmp * 0.8, Math.max(2, P.rustleGrains - 2));
+    }
+  }
+
+  // RUMBLE — long overlapping events create a continuous floor
+  if (myInstruments.has('rumble')) {
+    const pan = P.panRumble;
+    if (patterns.rum[s] && Math.random() < P.rumbleDensity) {
+      triggerRumble(t, pan, P.rumbleAmp, P.rumbleFreq);
+    }
+  }
+
+  // Tempo holder reports BPM
   if (myInstruments.has('tempo')) {
     chrome.runtime.sendMessage({
       type: "SEND_TEMPO",
@@ -492,18 +659,14 @@ let lastBarTick = null;
 
 function handleBarTick(bar, bpm, serverTime, receivedAt) {
   if (!playing || !actx) return;
-  const expectedStep = 0;
-  const stepDiff     = step - expectedStep;
-
+  const stepDiff = step - 0;
   if (Math.abs(stepDiff) > 2 || step > 13) {
     step     = 0;
     nextTime = actx.currentTime + 0.05;
     console.log(`Clock resync: hard snap to step 0`);
   } else if (stepDiff !== 0) {
-    const nudgeAmount = stepDiff * stepDur(bpm) * 0.3;
-    nextTime -= nudgeAmount;
+    nextTime -= stepDiff * stepDur(bpm) * 0.3;
   }
-
   lastBarTick = { bar, bpm, time: actx.currentTime };
 }
 
@@ -514,19 +677,14 @@ chrome.runtime.onMessage.addListener((message) => {
   switch (message.type) {
     case 'NETWORK_ROLE_STATE':
       break;
-
     case 'NETWORK_INSTRUMENTS_CONFIRMED':
       myInstruments = new Set(message.instruments || []);
       console.log(`My instruments: ${Array.from(myInstruments).join(', ')}`);
-      if (myInstruments.size > 0 && !playing && isAudioReady) {
-        startPlay();
-      }
+      if (myInstruments.size > 0 && !playing && isAudioReady) startPlay();
       break;
-
     case 'NETWORK_CURSOR_STATES':
       allCursorStates = message.states || [];
       break;
-
     case 'NETWORK_BAR_TICK':
       handleBarTick(message.bar, message.bpm, message.serverTime, message.receivedAt);
       break;
